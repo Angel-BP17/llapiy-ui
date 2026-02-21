@@ -1,0 +1,12 @@
+---
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+---
+
+<DashboardLayout title="Almacenamiento">
+  <div class="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
+    Esta ruta fue movida a <a href="/sections" class="font-semibold text-foreground underline">/sections</a>.
+  </div>
+  <script is:inline>
+    window.location.replace("/sections");
+  </script>
+</DashboardLayout>

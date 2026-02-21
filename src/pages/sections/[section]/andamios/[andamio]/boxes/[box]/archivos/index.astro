@@ -1,0 +1,49 @@
+---
+import StorageModule from "../../../../../../../../components/storage/StorageModule";
+import { andamiosSeed, boxesSeed } from "../../../../../../../../components/storage/storage-data";
+import DashboardLayout from "../../../../../../../../layouts/DashboardLayout.astro";
+
+export function getStaticPaths() {
+  const andamioById = new Map(andamiosSeed.map((andamio) => [andamio.id, andamio]));
+
+  return boxesSeed.flatMap((box) => {
+    const andamio = andamioById.get(box.andamio_id);
+    if (!andamio) return [];
+
+    return [
+      {
+        params: {
+          section: String(andamio.section_id),
+          andamio: String(andamio.id),
+          box: String(box.id)
+        }
+      }
+    ];
+  });
+}
+
+const sectionId = Number.parseInt(Astro.params.section ?? "", 10);
+const andamioId = Number.parseInt(Astro.params.andamio ?? "", 10);
+const boxId = Number.parseInt(Astro.params.box ?? "", 10);
+if (Number.isNaN(sectionId) || Number.isNaN(andamioId) || Number.isNaN(boxId)) {
+  throw new Error("Parametros invalidos para archivos.");
+}
+
+const box = boxesSeed.find((item) => item.id === boxId);
+const pageTitle = box ? `Almacenamiento - Archivos de caja ${box.n_box}` : "Almacenamiento - Archivos";
+---
+
+<DashboardLayout title={pageTitle}>
+  <header class="mb-6">
+    <p class="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">Modulo</p>
+    <h1 class="mt-2 text-2xl font-semibold text-foreground">Almacenamiento / Archivos</h1>
+  </header>
+
+  <StorageModule
+    initialLevel="archivos"
+    sectionId={sectionId}
+    andamioId={andamioId}
+    boxId={boxId}
+    client:load
+  />
+</DashboardLayout>

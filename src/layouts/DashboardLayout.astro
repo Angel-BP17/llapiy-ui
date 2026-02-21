@@ -1,0 +1,355 @@
+﻿---
+import "../styles/global.css";
+import DashboardNavbar from "../components/layout/DashboardNavbar.astro";
+import DashboardSidebar from "../components/layout/DashboardSidebar.astro";
+import { config } from "../config/llapiy-config";
+
+const {
+  title = "Inicio",
+  userName = "ADMIN ADMIN",
+  userRole = "Especialista 1 de OCI",
+  brand = "Llapiy",
+  sections = null,
+} = Astro.props;
+
+const normalizePath = (path = "") => path.replace(/\/+$/, "") || "/";
+const currentPath = normalizePath(Astro.url.pathname);
+
+const pathMatches = (path, matcher) => {
+  const normalizedMatcher = normalizePath(matcher);
+  if (normalizedMatcher === "/") {
+    return path === "/";
+  }
+  return path === normalizedMatcher || path.startsWith(`${normalizedMatcher}/`);
+};
+
+const defaultSections = [
+  {
+    title: "NAVEGACION",
+    items: [
+      {
+        label: "Home",
+        href: "/",
+        icon: '<svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true"><path fill="currentColor" d="M12 4 3 11h2v9h6v-6h2v6h6v-9h2Z"/></svg>',
+      },
+      {
+        label: "Gestionar documentos",
+        match: ["/documentos", "/bloques"],
+        icon: '<svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true"><path fill="currentColor" d="M6 2h9l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm8 1.5V8h4.5L14 3.5ZM8 12h8v2H8v-2Zm0 4h8v2H8v-2Z"/></svg>',
+        children: [
+          {
+            label: "Documentos",
+            href: "/documentos",
+            match: ["/documentos"],
+          },
+          {
+            label: "Bloques",
+            href: "/bloques",
+            match: ["/bloques"],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    title: "BANDEJA",
+    items: [
+      {
+        label: "Bandeja de entrada",
+        href: "/bandeja",
+        match: ["/bandeja"],
+        icon: '<svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true"><path fill="currentColor" d="M4 4h16v8h-4l-2 4h-4l-2-4H4V4Zm0 10h4l2 4h4l2-4h4v6H4v-6Z"/></svg>',
+      },
+      {
+        label: "Almacenamiento",
+        href: "/sections",
+        match: ["/sections", "/almacenamiento"],
+        icon: '<svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true"><path fill="currentColor" d="M4 6h16v4H4V6Zm0 6h16v6H4v-6Zm2 2v2h12v-2H6Z"/></svg>',
+      },
+    ],
+  },
+  {
+    title: "ADMINISTRACION",
+    items: [
+      {
+        label: "Usuarios",
+        href: "/usuarios",
+        match: ["/usuarios"],
+        icon: '<svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true"><path fill="currentColor" d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-4.42 0-8 2-8 4.5V20h16v-1.5c0-2.5-3.58-4.5-8-4.5Z"/></svg>',
+      },
+      {
+        label: "Roles",
+        href: "/roles",
+        match: ["/roles", "/permissions", "/permisos"],
+        icon: '<svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true"><path fill="currentColor" d="m4 10 8-6 8 6v8a2 2 0 0 1-2 2h-4v-6H10v6H6a2 2 0 0 1-2-2v-8Z"/></svg>',
+      },
+      {
+        label: "Inf. adicional de documentos",
+        match: ["/tipos-documentos", "/campos"],
+        icon: '<svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true"><path fill="currentColor" d="M7 3h8l4 4v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm7 1.5V8h3.5L14 4.5ZM9 12h6v2H9v-2Zm0 4h6v2H9v-2Z"/></svg>',
+        children: [
+          {
+            label: "Tipos de documentos",
+            href: "/tipos-documentos",
+            match: ["/tipos-documentos", "/document-types"],
+          },
+          {
+            label: "Campos",
+            href: "/campos",
+            match: ["/campos"],
+          },
+        ],
+      },
+      {
+        label: "Areas",
+        match: ["/areas", "/tipos-grupos"],
+        icon: '<svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true"><path fill="currentColor" d="M3 7h18v4H3V7Zm0 6h18v4H3v-4Z"/></svg>',
+        children: [
+          {
+            label: "Gestionar Areas",
+            href: "/areas",
+            match: ["/areas"],
+          },
+          {
+            label: "Tipos de Grupos",
+            href: "/tipos-grupos",
+            match: ["/tipos-grupos", "/group-types"],
+          },
+        ],
+      },
+      {
+        label: "Registro de actividades",
+        href: "/actividades",
+        match: ["/actividades", "/activity-logs"],
+        icon: '<svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true"><path fill="currentColor" d="M7 4h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm2 4h6v2H9V8Zm0 4h6v2H9v-2Zm0 4h4v2H9v-2Z"/></svg>',
+      },
+    ],
+  },
+];
+
+const markItemState = (item) => {
+  const children = item.children?.map(markItemState) ?? null;
+  const selfActive =
+    (item.href && pathMatches(currentPath, item.href)) ||
+    (Array.isArray(item.match) &&
+      item.match.some((matcher) => pathMatches(currentPath, matcher)));
+  const childActive = children ? children.some((child) => child.active) : false;
+  const active = Boolean(selfActive || childActive);
+
+  return {
+    ...item,
+    children,
+    active,
+    open: item.open ?? childActive,
+  };
+};
+
+const navSections = (sections ?? defaultSections).map((section) => ({
+  ...section,
+  items: section.items.map(markItemState),
+}));
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+  </head>
+  <body class="bg-muted/40 text-foreground">
+    <div
+      id="app-shell"
+      class="relative min-h-screen"
+      style="--sidebar-width:18rem;"
+    >
+      <DashboardSidebar
+        userName={userName}
+        userRole={userRole}
+        sections={navSections}
+      />
+
+      <div
+        class="flex min-h-screen flex-col transition-[padding] duration-200 lg:pl-[var(--sidebar-width)]"
+      >
+        <DashboardNavbar brand={brand} />
+
+        <main class="flex-1 px-4 pb-12 pt-6 sm:px-6 lg:px-8">
+          <div class="mx-auto w-full max-w-6xl">
+            <slot />
+          </div>
+        </main>
+
+        <footer
+          class="border-t border-border bg-background px-4 py-4 text-xs text-muted-foreground sm:px-6 lg:px-8"
+        >
+          UGEL Santa &copy; 2026
+        </footer>
+      </div>
+    </div>
+
+    <div
+      id="sidebar-backdrop"
+      class="pointer-events-none fixed inset-0 z-30 bg-black/30 opacity-0 transition lg:hidden"
+    >
+    </div>
+
+    <script is:inline define:vars={{ apiBase: config.apiUrl }}>
+      const loginPath = "/auth/login";
+      const authFlag = localStorage.getItem("llapiy_authenticated");
+      const authPayload = localStorage.getItem("llapiy_auth_payload");
+      const collapseKey = "llapiy_sidebar_collapsed";
+
+      if (!authFlag && !authPayload) {
+        window.location.replace(loginPath);
+      }
+
+      window.llapiyLogout = async () => {
+        const token = localStorage.getItem("llapiy_auth_token");
+        if (token) {
+          try {
+            await fetch(`${apiBase}/auth/logout`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: "application/json"
+              }
+            });
+          } catch (error) {
+            console.error("[DashboardLayout] No se pudo cerrar sesion en API:", error);
+          }
+        }
+        localStorage.removeItem("llapiy_authenticated");
+        localStorage.removeItem("llapiy_auth_token");
+        localStorage.removeItem("llapiy_auth_payload");
+        localStorage.removeItem("llapiy_auth_session_cache");
+        window.location.replace(loginPath);
+      };
+
+      const appShell = document.getElementById("app-shell");
+      const sidebar = document.getElementById("dashboard-sidebar");
+      const backdrop = document.getElementById("sidebar-backdrop");
+      const toggleButtons = document.querySelectorAll("[data-sidebar-toggle]");
+      const submenuToggles = document.querySelectorAll("[data-submenu-toggle]");
+      const isDesktop = () => window.matchMedia("(min-width: 1024px)").matches;
+
+      const openSidebar = () => {
+        sidebar?.classList.remove("-translate-x-full");
+        backdrop?.classList.remove("opacity-0");
+        backdrop?.classList.add("opacity-100");
+        backdrop?.classList.remove("pointer-events-none");
+      };
+
+      const closeSidebar = () => {
+        sidebar?.classList.add("-translate-x-full");
+        backdrop?.classList.add("opacity-0");
+        backdrop?.classList.remove("opacity-100");
+        backdrop?.classList.add("pointer-events-none");
+      };
+
+      const setCollapsed = (collapsed) => {
+        if (!appShell || !sidebar) return;
+        appShell.classList.toggle("sidebar-collapsed", collapsed);
+        appShell.style.setProperty(
+          "--sidebar-width",
+          collapsed ? "5rem" : "18rem",
+        );
+        localStorage.setItem(collapseKey, collapsed ? "1" : "0");
+
+        const items = sidebar.querySelectorAll("[data-sidebar-item]");
+        items.forEach((item) => {
+          const toggle = item.querySelector("[data-submenu-toggle]");
+          if (collapsed) {
+            item.classList.remove("is-open");
+          } else if (item.getAttribute("data-active") === "true") {
+            item.classList.add("is-open");
+          }
+          toggle?.setAttribute(
+            "aria-expanded",
+            String(item.classList.contains("is-open")),
+          );
+        });
+      };
+
+      const syncSidebarByViewport = () => {
+        if (isDesktop()) {
+          sidebar?.classList.remove("-translate-x-full");
+          backdrop?.classList.add("opacity-0");
+          backdrop?.classList.remove("opacity-100");
+          backdrop?.classList.add("pointer-events-none");
+        } else {
+          closeSidebar();
+        }
+      };
+
+      toggleButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          if (isDesktop()) {
+            setCollapsed(!appShell?.classList.contains("sidebar-collapsed"));
+          } else {
+            if (sidebar?.classList.contains("-translate-x-full")) {
+              openSidebar();
+            } else {
+              closeSidebar();
+            }
+          }
+        });
+      });
+
+      submenuToggles.forEach((button) => {
+        button.addEventListener("click", () => {
+          const item = button.closest("[data-sidebar-item]");
+          if (!item || appShell?.classList.contains("sidebar-collapsed"))
+            return;
+          const next = !item.classList.contains("is-open");
+          item.classList.toggle("is-open", next);
+          button.setAttribute("aria-expanded", String(next));
+        });
+      });
+
+      backdrop?.addEventListener("click", closeSidebar);
+
+      const savedCollapsed = localStorage.getItem(collapseKey) === "1";
+      setCollapsed(savedCollapsed);
+      syncSidebarByViewport();
+      window.addEventListener("resize", syncSidebarByViewport);
+    </script>
+    <style is:inline>
+      #dashboard-sidebar [data-submenu-panel] {
+        max-height: 0;
+        opacity: 0.45;
+        transition:
+          max-height 0.32s ease-out,
+          opacity 0.24s ease-out;
+      }
+
+      #dashboard-sidebar [data-sidebar-item].is-open > [data-submenu-panel] {
+        max-height: 16rem;
+        opacity: 1;
+      }
+
+      #dashboard-sidebar [data-sidebar-item].is-open [data-sidebar-icon] {
+        transform: rotate(90deg);
+      }
+
+      .sidebar-collapsed #dashboard-sidebar {
+        width: 5rem;
+      }
+
+      .sidebar-collapsed #dashboard-sidebar [data-sidebar-label] {
+        display: none;
+      }
+
+      .sidebar-collapsed #dashboard-sidebar a,
+      .sidebar-collapsed #dashboard-sidebar summary {
+        justify-content: center;
+      }
+
+      .sidebar-collapsed #dashboard-sidebar [data-sidebar-user] > div {
+        justify-content: center;
+      }
+    </style>
+  </body>
+</html>

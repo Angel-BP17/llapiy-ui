@@ -1,0 +1,13 @@
+---
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import ActivityLogsModule from "../../components/activity-logs/ActivityLogsModule";
+---
+
+<DashboardLayout title="Registro de actividades">
+  <header class="mb-6">
+    <p class="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">Modulo</p>
+    <h1 class="mt-2 text-2xl font-semibold text-foreground">Registro de actividades</h1>
+  </header>
+
+  <ActivityLogsModule client:load />
+</DashboardLayout>

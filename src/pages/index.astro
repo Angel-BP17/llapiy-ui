@@ -1,11 +1,539 @@
----
-import Welcome from '../components/Welcome.astro';
-import Layout from '../layouts/Layout.astro';
+﻿---
+import DashboardLayout from "../layouts/DashboardLayout.astro";
+import { config } from "../config/llapiy-config";
 
-// Welcome to Astro! Wondering what to do next? Check out the Astro documentation at https://docs.astro.build
-// Don't want to use any of this? Delete everything in this file, the `assets`, `components`, and `layouts` directories, and start fresh.
+const stats = [
+  {
+    label: "Usuarios registrados",
+    value: 2,
+    href: "/usuarios",
+    permission: "users.view",
+    tone: "violet",
+    icon:
+      '<svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true"><path fill="currentColor" d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-4.42 0-8 2-8 4.5V20h16v-1.5c0-2.5-3.58-4.5-8-4.5Z"/></svg>'
+  },
+  {
+    label: "Archivos registrados",
+    value: 0,
+    href: "/documentos",
+    permission: "documents.view",
+    tone: "rose",
+    icon:
+      '<svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true"><path fill="currentColor" d="M6 2h9l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm8 1.5V8h4.5L14 3.5ZM8 12h8v2H8v-2Zm0 4h8v2H8v-2Z"/></svg>'
+  },
+  {
+    label: "Bloques no almacenados",
+    value: 0,
+    href: "/bandeja",
+    permission: "inbox.view",
+    tone: "emerald",
+    icon:
+      '<svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true"><path fill="currentColor" d="M4 6h16v4H4V6Zm0 6h16v6H4v-6Zm2 2v2h12v-2H6Z"/></svg>'
+  },
+  {
+    label: "Tipos de documentos",
+    value: 1,
+    href: "/tipos-documentos",
+    permission: "document-types.view",
+    tone: "amber",
+    icon:
+      '<svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true"><path fill="currentColor" d="M4 4h16v5H4V4Zm0 7h16v9H4v-9Zm3 2v5h10v-5H7Z"/></svg>'
+  }
+];
+
+const toneStyles = {
+  violet: "bg-violet-100 text-violet-600",
+  rose: "bg-rose-100 text-rose-600",
+  emerald: "bg-emerald-100 text-emerald-600",
+  amber: "bg-amber-100 text-amber-600"
+};
+
+const initialDashboardData = {
+  documentosRecientes: [],
+  documentosPorTipo: [],
+  documentosPorMes: []
+};
+
+const dashboardBootstrap = JSON.stringify({
+  initialDashboardData,
+  apiUrl: config.apiUrl
+}).replace(/</g, "\\u003c");
 ---
 
-<Layout>
-	<Welcome />
-</Layout>
+<DashboardLayout title="Inicio">
+  <header class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div>
+      <p class="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
+        Inicio
+      </p>
+      <h1 class="mt-2 text-2xl font-semibold text-foreground">Panel principal</h1>
+      <p class="mt-1 text-sm text-muted-foreground">
+        Resumen general de actividad y estado documental.
+      </p>
+    </div>
+    <button
+      type="button"
+      class="inline-flex items-center justify-center rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:bg-accent"
+    >
+      Descargar reporte
+    </button>
+  </header>
+
+  <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    {stats.map((stat) => (
+      <a
+        href={stat.href}
+        data-stat-card
+        data-required-permission={stat.permission}
+        class="group rounded-xl border border-border bg-card p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+      >
+        <div class="flex items-center gap-3">
+          <div
+            class={`flex h-12 w-12 items-center justify-center rounded-xl ${toneStyles[stat.tone]}`}
+            set:html={stat.icon}
+          />
+          <div class="flex-1">
+            <p class="text-sm font-medium text-muted-foreground">{stat.label}</p>
+            <div class="mt-1 h-8">
+              <p
+                class="text-2xl font-semibold leading-8 text-foreground"
+                data-stat-value={stat.label}
+                data-home-counter
+              >
+                {stat.value}
+              </p>
+              <div
+                class="hidden h-8 w-16 animate-pulse rounded-md bg-muted"
+                data-home-counter-skeleton
+              ></div>
+            </div>
+          </div>
+        </div>
+        <p class="mt-4 text-xs text-muted-foreground group-hover:text-foreground">
+          Ver detalle
+        </p>
+      </a>
+    ))}
+  </section>
+
+  <section class="mt-6 grid gap-6 lg:grid-cols-12">
+    <div class="rounded-xl border border-border bg-card p-5 shadow-sm lg:col-span-5">
+      <div class="mb-4 flex items-center justify-between">
+        <div>
+          <h2 class="text-sm font-semibold text-foreground">Documentos registrados</h2>
+          <p class="text-xs text-muted-foreground">Ultimos 17 dias</p>
+        </div>
+        <span class="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
+          Serie diaria
+        </span>
+      </div>
+      <div class="relative">
+        <div class="transition-opacity duration-200" data-home-chart-content>
+          <div class="relative h-56 w-full overflow-hidden rounded-lg bg-muted/40 p-4">
+            <svg viewBox="0 0 100 100" class="h-full w-full" data-home-line-svg>
+              <polyline
+                fill="none"
+                stroke="#f15765"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                data-home-line-polyline
+              />
+              <g data-home-line-points></g>
+            </svg>
+            <div class="absolute inset-0 hidden items-center justify-center text-sm text-muted-foreground" data-home-line-empty>
+              Sin documentos recientes.
+            </div>
+          </div>
+          <div class="mt-4 grid grid-cols-3 gap-3 text-xs text-muted-foreground" data-home-line-cards></div>
+        </div>
+        <div
+          class="pointer-events-none absolute inset-0 hidden animate-pulse rounded-xl bg-card/75 p-4 backdrop-blur-[1px]"
+          data-home-chart-skeleton
+        >
+          <div class="h-4 w-44 rounded bg-muted"></div>
+          <div class="mt-4 h-56 rounded-lg bg-muted/80"></div>
+          <div class="mt-4 grid grid-cols-3 gap-3">
+            <div class="h-11 rounded-md bg-muted"></div>
+            <div class="h-11 rounded-md bg-muted"></div>
+            <div class="h-11 rounded-md bg-muted"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-xl border border-border bg-card p-5 shadow-sm lg:col-span-4">
+      <div class="mb-4">
+        <h2 class="text-sm font-semibold text-foreground">Documentos ingresados por mes</h2>
+        <p class="text-xs text-muted-foreground">Cantidad por mes y anio</p>
+      </div>
+      <div class="relative">
+        <div class="transition-opacity duration-200" data-home-chart-content>
+          <div class="relative flex h-56 items-end gap-2 rounded-lg bg-muted/40 px-3 py-6" data-home-bar-bars>
+            <div class="absolute inset-0 hidden items-center justify-center text-sm text-muted-foreground" data-home-bar-empty>
+              Sin datos mensuales.
+            </div>
+          </div>
+          <div class="mt-4 flex items-center justify-between text-xs text-muted-foreground">
+            <span>Total periodo</span>
+            <span class="font-semibold text-foreground" data-home-bar-total>0 docs</span>
+          </div>
+        </div>
+        <div
+          class="pointer-events-none absolute inset-0 hidden animate-pulse rounded-xl bg-card/75 p-4 backdrop-blur-[1px]"
+          data-home-chart-skeleton
+        >
+          <div class="h-4 w-48 rounded bg-muted"></div>
+          <div class="mt-4 flex h-56 items-end gap-2 rounded-lg bg-muted/80 p-3">
+            <div class="h-1/3 flex-1 rounded bg-muted"></div>
+            <div class="h-1/2 flex-1 rounded bg-muted"></div>
+            <div class="h-2/3 flex-1 rounded bg-muted"></div>
+            <div class="h-1/2 flex-1 rounded bg-muted"></div>
+            <div class="h-3/4 flex-1 rounded bg-muted"></div>
+          </div>
+          <div class="mt-4 h-4 w-32 rounded bg-muted"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-xl border border-border bg-card p-5 shadow-sm lg:col-span-3">
+      <div class="mb-4">
+        <h2 class="text-sm font-semibold text-foreground">Tipos de documentos</h2>
+        <p class="text-xs text-muted-foreground">Porcentaje de tipos de documentos</p>
+      </div>
+      <div class="relative">
+        <div class="transition-opacity duration-200" data-home-chart-content>
+          <div class="rounded-lg bg-muted/40 p-4">
+            <div class="mx-auto h-40 w-40 rounded-full ring-8 ring-card" data-home-pie-donut></div>
+          </div>
+          <div class="mt-4 space-y-3" data-home-pie-legend></div>
+          <div class="mt-3 hidden text-sm text-muted-foreground" data-home-pie-empty>
+            Sin tipos de documentos para mostrar.
+          </div>
+        </div>
+        <div
+          class="pointer-events-none absolute inset-0 hidden animate-pulse rounded-xl bg-card/75 p-2 backdrop-blur-[1px]"
+          data-home-chart-skeleton
+        >
+          <div class="space-y-4 pt-2">
+            <div class="mx-auto h-40 w-40 rounded-full bg-muted"></div>
+            <div>
+              <div class="h-3 w-24 rounded bg-muted"></div>
+              <div class="mt-2 h-2 rounded bg-muted"></div>
+            </div>
+            <div>
+              <div class="h-3 w-20 rounded bg-muted"></div>
+              <div class="mt-2 h-2 rounded bg-muted"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script id="dashboard-bootstrap" type="application/json" set:html={dashboardBootstrap}></script>
+
+  <script>
+    import { can as canPermission, getAuthSession } from "@/lib/auth-session";
+
+    let bootstrapPayload = {};
+    const bootstrapNode = document.getElementById("dashboard-bootstrap");
+    if (bootstrapNode?.textContent) {
+      try {
+        bootstrapPayload = JSON.parse(bootstrapNode.textContent);
+      } catch (error) {
+        console.error("[Dashboard] Bootstrap invalido:", error);
+      }
+    }
+
+    const initialDashboardData = bootstrapPayload?.initialDashboardData ?? {
+      documentosRecientes: [],
+      documentosPorTipo: [],
+      documentosPorMes: []
+    };
+    const apiUrl = String(bootstrapPayload?.apiUrl ?? "");
+
+    const dashboardDataState = {
+      documentosRecientes: [...(initialDashboardData.documentosRecientes || [])],
+      documentosPorTipo: [...(initialDashboardData.documentosPorTipo || [])],
+      documentosPorMes: [...(initialDashboardData.documentosPorMes || [])]
+    };
+
+    const monthNames = [
+      "Enero",
+      "Febrero",
+      "Marzo",
+      "Abril",
+      "Mayo",
+      "Junio",
+      "Julio",
+      "Agosto",
+      "Septiembre",
+      "Octubre",
+      "Noviembre",
+      "Diciembre"
+    ];
+
+    const piePalette = ["#44b2d7", "#59c2e6", "#71d1f2", "#96e5ff", "#aacdff"];
+
+    const escapeHtml = (value) =>
+      String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+
+    const formatDate = (dateString) => {
+      const date = new Date(dateString);
+      if (Number.isNaN(date.getTime())) return String(dateString ?? "");
+      const day = String(date.getDate()).padStart(2, "0");
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      return `${day}/${month}`;
+    };
+
+    const setLoadingState = (loading) => {
+      document.querySelectorAll("[data-home-counter]").forEach((node) => {
+        node.classList.toggle("hidden", loading);
+      });
+      document.querySelectorAll("[data-home-counter-skeleton]").forEach((node) => {
+        node.classList.toggle("hidden", !loading);
+      });
+      document.querySelectorAll("[data-home-chart-content]").forEach((node) => {
+        node.classList.toggle("opacity-30", loading);
+      });
+      document.querySelectorAll("[data-home-chart-skeleton]").forEach((node) => {
+        node.classList.toggle("hidden", !loading);
+      });
+    };
+
+    const renderLineChart = (records) => {
+      const linePolyline = document.querySelector("[data-home-line-polyline]");
+      const linePoints = document.querySelector("[data-home-line-points]");
+      const lineCards = document.querySelector("[data-home-line-cards]");
+      const lineEmpty = document.querySelector("[data-home-line-empty]");
+
+      if (!linePolyline || !linePoints || !lineCards || !lineEmpty) return;
+
+      const normalized = (Array.isArray(records) ? records : [])
+        .map((item) => ({
+          fecha: String(item?.fecha ?? ""),
+          cantidad: Number(item?.cantidad ?? 0)
+        }))
+        .filter((item) => item.fecha);
+
+      if (!normalized.length) {
+        linePolyline.setAttribute("points", "");
+        linePoints.innerHTML = "";
+        lineCards.innerHTML = "";
+        lineEmpty.classList.remove("hidden");
+        lineEmpty.classList.add("flex");
+        return;
+      }
+
+      lineEmpty.classList.add("hidden");
+      lineEmpty.classList.remove("flex");
+
+      const values = normalized.map((item) => Math.max(item.cantidad, 0));
+      const maxValue = Math.max(...values, 1);
+      const denominator = Math.max(values.length - 1, 1);
+      const points = values.map((value, index) => {
+        const x = (index / denominator) * 100;
+        const y = 100 - (value / maxValue) * 100;
+        return { x, y };
+      });
+
+      linePolyline.setAttribute(
+        "points",
+        points.map((point) => `${point.x},${point.y}`).join(" ")
+      );
+      linePoints.innerHTML = points
+        .map(
+          (point) =>
+            `<circle cx="${point.x}" cy="${point.y}" r="2.8" fill="#f15765"></circle>`
+        )
+        .join("");
+
+      lineCards.innerHTML = normalized
+        .slice(-6)
+        .map(
+          (item) => `
+            <div class="rounded-lg border border-border bg-background px-3 py-2">
+              <p class="font-semibold text-foreground">${item.cantidad}</p>
+              <p>${escapeHtml(formatDate(item.fecha))}</p>
+            </div>
+          `
+        )
+        .join("");
+    };
+
+    const renderBarChart = (records) => {
+      const barsContainer = document.querySelector("[data-home-bar-bars]");
+      const emptyNode = document.querySelector("[data-home-bar-empty]");
+      const totalNode = document.querySelector("[data-home-bar-total]");
+      if (!barsContainer || !emptyNode || !totalNode) return;
+
+      const normalized = (Array.isArray(records) ? records : [])
+        .map((item) => ({
+          anio: Number(item?.anio ?? 0),
+          mes: Number(item?.mes ?? 0),
+          cantidad: Number(item?.cantidad ?? 0)
+        }))
+        .filter((item) => item.anio > 0 && item.mes >= 1 && item.mes <= 12)
+        .sort((a, b) => (a.anio - b.anio) || (a.mes - b.mes));
+
+      if (!normalized.length) {
+        barsContainer.innerHTML = "";
+        emptyNode.classList.remove("hidden");
+        emptyNode.classList.add("flex");
+        totalNode.textContent = "0 docs";
+        return;
+      }
+
+      emptyNode.classList.add("hidden");
+      emptyNode.classList.remove("flex");
+
+      const maxValue = Math.max(...normalized.map((item) => item.cantidad), 1);
+      const total = normalized.reduce((sum, item) => sum + item.cantidad, 0);
+
+      barsContainer.innerHTML = normalized
+        .map((item) => {
+          const label = `${monthNames[item.mes - 1]} ${item.anio}`;
+          const ratio = Math.max(item.cantidad / maxValue, 0);
+          const height = Math.max(8, ratio * 100);
+          return `
+            <div class="flex min-w-0 flex-1 flex-col items-center gap-2">
+              <div class="w-full rounded-md bg-primary/80" style="height:${height}%"></div>
+              <span class="line-clamp-2 text-center text-[11px] text-muted-foreground">${escapeHtml(label)}</span>
+            </div>
+          `;
+        })
+        .join("");
+
+      totalNode.textContent = `${total} docs`;
+    };
+
+    const renderPieChart = (records) => {
+      const donutNode = document.querySelector("[data-home-pie-donut]");
+      const legendNode = document.querySelector("[data-home-pie-legend]");
+      const emptyNode = document.querySelector("[data-home-pie-empty]");
+      if (!donutNode || !legendNode || !emptyNode) return;
+
+      const normalized = (Array.isArray(records) ? records : [])
+        .map((item) => ({
+          tipo: String(item?.tipo ?? "Sin tipo"),
+          porcentaje: Number(item?.porcentaje ?? 0)
+        }))
+        .filter((item) => item.porcentaje > 0);
+
+      if (!normalized.length) {
+        donutNode.style.background = "#e5e7eb";
+        legendNode.innerHTML = "";
+        emptyNode.classList.remove("hidden");
+        return;
+      }
+
+      emptyNode.classList.add("hidden");
+
+      let start = 0;
+      const segments = normalized.map((item, index) => {
+        const color = piePalette[index % piePalette.length];
+        const end = Math.min(100, start + item.porcentaje);
+        const segment = `${color} ${start}% ${end}%`;
+        start = end;
+        return segment;
+      });
+      if (start < 100) segments.push(`#e5e7eb ${start}% 100%`);
+      donutNode.style.background = `conic-gradient(${segments.join(", ")})`;
+
+      legendNode.innerHTML = normalized
+        .map((item, index) => {
+          const color = piePalette[index % piePalette.length];
+          return `
+            <div class="flex items-center justify-between gap-2 text-xs">
+              <span class="inline-flex items-center gap-2 text-foreground">
+                <span class="h-2.5 w-2.5 rounded-full" style="background:${color}"></span>
+                ${escapeHtml(item.tipo)}
+              </span>
+              <span class="font-semibold text-muted-foreground">${item.porcentaje}%</span>
+            </div>
+          `;
+        })
+        .join("");
+    };
+
+    const renderCharts = () => {
+      renderLineChart(dashboardDataState.documentosRecientes);
+      renderBarChart(dashboardDataState.documentosPorMes);
+      renderPieChart(dashboardDataState.documentosPorTipo);
+    };
+
+    const applyStatVisibility = (session) => {
+      document.querySelectorAll("[data-stat-card]").forEach((node) => {
+        const permission = node.getAttribute("data-required-permission");
+        if (!permission) return;
+        const visible = canPermission(session, permission);
+        node.classList.toggle("hidden", !visible);
+      });
+    };
+
+    document.addEventListener("DOMContentLoaded", async () => {
+      const session = await getAuthSession().catch(() => null);
+      applyStatVisibility(session);
+
+      window.dashboardData = { ...dashboardDataState };
+      renderCharts();
+      setLoadingState(true);
+
+      const token = localStorage.getItem("llapiy_auth_token");
+      if (!token) {
+        window.setTimeout(() => setLoadingState(false), 250);
+        return;
+      }
+
+      fetch(`${apiUrl}/dashboard`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json"
+        }
+      })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload) => {
+          const data = payload?.data;
+          if (!data) return;
+
+          const statsMap = new Map([
+            ["Usuarios registrados", data.userCount],
+            ["Archivos registrados", data.documentCount],
+            ["Bloques no almacenados", data.totalNoAlmacenados],
+            ["Tipos de documentos", data.documentTypeCount]
+          ]);
+
+          document.querySelectorAll("[data-stat-value]").forEach((node) => {
+            const label = node.getAttribute("data-stat-value");
+            if (!label || !statsMap.has(label)) return;
+            node.textContent = String(statsMap.get(label));
+          });
+
+          dashboardDataState.documentosRecientes = Array.isArray(data.documentosRecientes)
+            ? data.documentosRecientes
+            : [];
+          dashboardDataState.documentosPorTipo = Array.isArray(data.documentosPorTipo)
+            ? data.documentosPorTipo
+            : [];
+          dashboardDataState.documentosPorMes = Array.isArray(data.documentosPorMes)
+            ? data.documentosPorMes
+            : [];
+
+          window.dashboardData = { ...dashboardDataState };
+          renderCharts();
+        })
+        .catch((error) => {
+          console.error("[Dashboard] Error al cargar metricas:", error);
+        })
+        .finally(() => {
+          setLoadingState(false);
+        });
+    });
+  </script>
+</DashboardLayout>

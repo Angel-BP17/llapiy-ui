@@ -1,0 +1,13 @@
+---
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import UsersModule from "../../components/users/UsersModule";
+---
+
+<DashboardLayout title="Usuarios">
+  <header class="mb-6">
+    <p class="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">Modulo</p>
+    <h1 class="mt-2 text-2xl font-semibold text-foreground">Usuarios</h1>
+  </header>
+
+  <UsersModule client:load />
+</DashboardLayout>

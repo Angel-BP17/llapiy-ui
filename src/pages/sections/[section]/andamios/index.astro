@@ -1,0 +1,28 @@
+---
+import StorageModule from "../../../../components/storage/StorageModule";
+import { sectionsSeed } from "../../../../components/storage/storage-data";
+import DashboardLayout from "../../../../layouts/DashboardLayout.astro";
+
+export function getStaticPaths() {
+  return sectionsSeed.map((section) => ({
+    params: { section: String(section.id) }
+  }));
+}
+
+const sectionId = Number.parseInt(Astro.params.section ?? "", 10);
+if (Number.isNaN(sectionId)) {
+  throw new Error("Section invalida.");
+}
+
+const section = sectionsSeed.find((item) => item.id === sectionId);
+const pageTitle = section ? `Almacenamiento - Andamios de seccion ${section.n_section}` : "Almacenamiento - Andamios";
+---
+
+<DashboardLayout title={pageTitle}>
+  <header class="mb-6">
+    <p class="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">Modulo</p>
+    <h1 class="mt-2 text-2xl font-semibold text-foreground">Almacenamiento / Andamios</h1>
+  </header>
+
+  <StorageModule initialLevel="andamios" sectionId={sectionId} client:load />
+</DashboardLayout>

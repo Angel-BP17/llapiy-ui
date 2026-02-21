@@ -1,0 +1,32 @@
+---
+import StorageModule from "../../../../../../components/storage/StorageModule";
+import { andamiosSeed } from "../../../../../../components/storage/storage-data";
+import DashboardLayout from "../../../../../../layouts/DashboardLayout.astro";
+
+export function getStaticPaths() {
+  return andamiosSeed.map((andamio) => ({
+    params: {
+      section: String(andamio.section_id),
+      andamio: String(andamio.id)
+    }
+  }));
+}
+
+const sectionId = Number.parseInt(Astro.params.section ?? "", 10);
+const andamioId = Number.parseInt(Astro.params.andamio ?? "", 10);
+if (Number.isNaN(sectionId) || Number.isNaN(andamioId)) {
+  throw new Error("Parametros invalidos para cajas.");
+}
+
+const andamio = andamiosSeed.find((item) => item.id === andamioId);
+const pageTitle = andamio ? `Almacenamiento - Cajas de andamio ${andamio.n_andamio}` : "Almacenamiento - Cajas";
+---
+
+<DashboardLayout title={pageTitle}>
+  <header class="mb-6">
+    <p class="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">Modulo</p>
+    <h1 class="mt-2 text-2xl font-semibold text-foreground">Almacenamiento / Cajas</h1>
+  </header>
+
+  <StorageModule initialLevel="boxes" sectionId={sectionId} andamioId={andamioId} client:load />
+</DashboardLayout>

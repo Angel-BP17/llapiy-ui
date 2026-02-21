@@ -1,0 +1,13 @@
+---
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import DocumentsModule from "../../components/documents/DocumentsModule";
+---
+
+<DashboardLayout title="Documentos">
+  <header class="mb-6">
+    <p class="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">Modulo</p>
+    <h1 class="mt-2 text-2xl font-semibold text-foreground">Documentos</h1>
+  </header>
+
+  <DocumentsModule client:load />
+</DashboardLayout>

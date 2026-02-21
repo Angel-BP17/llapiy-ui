@@ -1,0 +1,13 @@
+---
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import GroupTypesModule from "../../components/group-types/GroupTypesModule";
+---
+
+<DashboardLayout title="Tipos de grupos">
+  <header class="mb-6">
+    <p class="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">Modulo</p>
+    <h1 class="mt-2 text-2xl font-semibold text-foreground">Tipos de grupos</h1>
+  </header>
+
+  <GroupTypesModule client:load />
+</DashboardLayout>
