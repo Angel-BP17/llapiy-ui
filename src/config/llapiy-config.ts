@@ -73,6 +73,18 @@ export const config = {
       update: "/areas/:id",
       delete: "/areas/:id"
     },
+    groups: {
+      create: "/groups",
+      show: "/groups/:id",
+      update: "/groups/:id",
+      delete: "/groups/:id"
+    },
+    subgroups: {
+      create: "/subgroups",
+      show: "/subgroups/:id",
+      update: "/subgroups/:id",
+      delete: "/subgroups/:id"
+    },
     groupTypes: {
       list: "/group_types",
       create: "/group_types",
@@ -81,6 +93,7 @@ export const config = {
     },
     storage: {
       sections: "/sections",
+      sectionById: "/sections/:section",
       andamios: "/sections/:section/andamios",
       andamioById: "/sections/:section/andamios/:andamio",
       boxes: "/sections/:section/andamios/:andamio/boxes",

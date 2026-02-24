@@ -1,8 +1,7 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { useEffect } from "react";
-import { config } from "@/config/llapiy-config";
-import { apiGet, toList, unwrapData } from "@/lib/llapiy-api";
+import { config, withId } from "@/config/llapiy-config";
+import { apiDelete, apiGet, apiPost, apiPut, toList, unwrapData } from "@/lib/llapiy-api";
 import { Building2, Eye, Pencil, Plus, Trash2 } from "lucide-react";
 
 type AreaRecord = {
@@ -57,6 +56,16 @@ const subgroupsSeed: SubgroupRecord[] = [];
 const emptyAreaForm: AreaForm = { descripcion: "", abreviacion: "" };
 const emptyGroupForm: GroupForm = { descripcion: "", abreviacion: "", group_type_id: "" };
 const emptySubgroupForm: SubgroupForm = { descripcion: "", abreviacion: "", parent_subgroup_id: "" };
+
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const maybeMessage = (error as { message?: unknown }).message;
+    if (typeof maybeMessage === "string" && maybeMessage.trim()) {
+      return maybeMessage;
+    }
+  }
+  return fallback;
+}
 
 function Modal({
   open,
@@ -146,75 +155,69 @@ export default function AreasModule() {
   const [groupForm, setGroupForm] = useState<GroupForm>(emptyGroupForm);
   const [subgroupForms, setSubgroupForms] = useState<Record<number, SubgroupForm>>({});
   const [errorMessage, setErrorMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    let ignore = false;
+  const loadAreasData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [areasResponse, groupTypesResponse] = await Promise.all([
+        apiGet<{ areas: any[] }>(config.endpoints.areas.list),
+        apiGet<{ groupTypes: { data: any[] } | any[] }>(config.endpoints.groupTypes.list)
+      ]);
 
-    const load = async () => {
-      setIsLoading(true);
-      try {
-        const [areasResponse, groupTypesResponse] = await Promise.all([
-          apiGet<{ areas: any[] }>(config.endpoints.areas.list),
-          apiGet<{ groupTypes: { data: any[] } | any[] }>(config.endpoints.groupTypes.list)
-        ]);
+      const areasData = unwrapData(areasResponse) as { areas?: unknown };
+      const typesData = unwrapData(groupTypesResponse) as { groupTypes?: unknown };
 
-        const areasData = unwrapData(areasResponse) as { areas?: unknown };
-        const typesData = unwrapData(groupTypesResponse) as { groupTypes?: unknown };
+      const nextAreas = toList<any>(areasData?.areas).map((area) => ({
+        id: Number(area?.id ?? 0),
+        descripcion: String(area?.descripcion ?? ""),
+        abreviacion: String(area?.abreviacion ?? "")
+      }));
 
-        const nextAreas = toList<any>(areasData?.areas).map((area) => ({
-          id: Number(area?.id ?? 0),
-          descripcion: String(area?.descripcion ?? ""),
-          abreviacion: String(area?.abreviacion ?? "")
-        }));
+      const nextGroups: GroupRecord[] = [];
+      const nextSubgroups: SubgroupRecord[] = [];
 
-        const nextGroups: GroupRecord[] = [];
-        const nextSubgroups: SubgroupRecord[] = [];
+      toList<any>(areasData?.areas).forEach((area) => {
+        toList<any>(area?.groups).forEach((group) => {
+          nextGroups.push({
+            id: Number(group?.id ?? 0),
+            area_id: Number(area?.id ?? 0),
+            group_type_id: Number(group?.area_group_type?.group_type?.id ?? 0),
+            descripcion: String(group?.descripcion ?? ""),
+            abreviacion: String(group?.abreviacion ?? "")
+          });
 
-        toList<any>(areasData?.areas).forEach((area) => {
-          toList<any>(area?.groups).forEach((group) => {
-            nextGroups.push({
-              id: Number(group?.id ?? 0),
-              area_id: Number(area?.id ?? 0),
-              group_type_id: Number(group?.area_group_type?.group_type?.id ?? 0),
-              descripcion: String(group?.descripcion ?? ""),
-              abreviacion: String(group?.abreviacion ?? "")
-            });
-
-            toList<any>(group?.subgroups).forEach((subgroup) => {
-              nextSubgroups.push({
-                id: Number(subgroup?.id ?? 0),
-                group_id: Number(group?.id ?? 0),
-                descripcion: String(subgroup?.descripcion ?? ""),
-                abreviacion: String(subgroup?.abreviacion ?? ""),
-                parent_subgroup_id: Number(subgroup?.parent_subgroup_id ?? 0) || null
-              });
+          toList<any>(group?.subgroups).forEach((subgroup) => {
+            nextSubgroups.push({
+              id: Number(subgroup?.id ?? 0),
+              group_id: Number(group?.id ?? 0),
+              descripcion: String(subgroup?.descripcion ?? ""),
+              abreviacion: String(subgroup?.abreviacion ?? ""),
+              parent_subgroup_id: Number(subgroup?.parent_subgroup_id ?? 0) || null
             });
           });
         });
+      });
 
-        const nextTypes = toList<any>(typesData?.groupTypes).map((item) => ({
-          id: Number(item?.id ?? 0),
-          descripcion: String(item?.descripcion ?? "")
-        }));
+      const nextTypes = toList<any>(typesData?.groupTypes).map((item) => ({
+        id: Number(item?.id ?? 0),
+        descripcion: String(item?.descripcion ?? "")
+      }));
 
-        if (!ignore) {
-          setAreas(nextAreas);
-          setGroups(nextGroups);
-          setSubgroups(nextSubgroups);
-          setGroupTypes(nextTypes);
-        }
-      } catch (error) {
-        console.error("[AreasModule] Load error:", error);
-      } finally {
-        if (!ignore) setIsLoading(false);
-      }
-    };
-
-    void load();
-    return () => {
-      ignore = true;
-    };
+      setAreas(nextAreas);
+      setGroups(nextGroups);
+      setSubgroups(nextSubgroups);
+      setGroupTypes(nextTypes);
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error, "No se pudo cargar el modulo de areas."));
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadAreasData();
+  }, [loadAreasData]);
 
   const groupTypeMap = useMemo(() => new Map(groupTypes.map((item) => [item.id, item.descripcion])), [groupTypes]);
   const groupsByArea = useMemo(() => {
@@ -257,74 +260,145 @@ export default function AreasModule() {
 
   const submitCreateArea = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSubmitting) return;
     setErrorMessage("");
     if (!areaForm.descripcion.trim()) {
       setErrorMessage("Ingrese la descripcion del area.");
       return;
     }
-    const nextId = areas.length ? Math.max(...areas.map((item) => item.id)) + 1 : 1;
-    setAreas((previous) => [...previous, { id: nextId, descripcion: areaForm.descripcion.trim(), abreviacion: areaForm.abreviacion.trim() }]);
-    setCreateOpen(false);
-    setAreaForm(emptyAreaForm);
+
+    void (async () => {
+      setIsSubmitting(true);
+      try {
+        await apiPost(config.endpoints.areas.create, {
+          descripcion: areaForm.descripcion.trim(),
+          abreviacion: areaForm.abreviacion.trim() || undefined
+        });
+        await loadAreasData();
+        setCreateOpen(false);
+        setAreaForm(emptyAreaForm);
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo crear el area."));
+      } finally {
+        setIsSubmitting(false);
+      }
+    })();
   };
 
   const submitEditArea = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selectedArea) return;
+    if (isSubmitting) return;
     if (!areaForm.descripcion.trim()) {
       setErrorMessage("Ingrese la descripcion del area.");
       return;
     }
-    setAreas((previous) =>
-      previous.map((area) =>
-        area.id === selectedArea.id ? { ...area, descripcion: areaForm.descripcion.trim(), abreviacion: areaForm.abreviacion.trim() } : area
-      )
-    );
-    setEditOpen(false);
-    setSelectedArea(null);
-    setAreaForm(emptyAreaForm);
+
+    void (async () => {
+      setIsSubmitting(true);
+      try {
+        await apiPut(withId(config.endpoints.areas.update, selectedArea.id), {
+          descripcion: areaForm.descripcion.trim(),
+          abreviacion: areaForm.abreviacion.trim() || undefined
+        });
+        await loadAreasData();
+        setEditOpen(false);
+        setSelectedArea(null);
+        setAreaForm(emptyAreaForm);
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo actualizar el area."));
+      } finally {
+        setIsSubmitting(false);
+      }
+    })();
   };
 
   const deleteArea = (areaId: number) => {
+    if (isSubmitting) return;
     if (totalGroupsForArea(areaId) > 0) return;
     if (!window.confirm("Eliminar esta area y sus datos relacionados?")) return;
-    setAreas((previous) => previous.filter((area) => area.id !== areaId));
+
+    void (async () => {
+      setIsSubmitting(true);
+      try {
+        await apiDelete(withId(config.endpoints.areas.delete, areaId));
+        await loadAreasData();
+        setSelectedArea((previous) => (previous?.id === areaId ? null : previous));
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo eliminar el area."));
+      } finally {
+        setIsSubmitting(false);
+      }
+    })();
   };
 
   const submitCreateGroup = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selectedArea) return;
+    if (isSubmitting) return;
     if (!groupForm.descripcion.trim() || !groupForm.group_type_id) {
       setErrorMessage("Complete descripcion y tipo de grupo.");
       return;
     }
-    const nextId = groups.length ? Math.max(...groups.map((item) => item.id)) + 1 : 1;
-    setGroups((previous) => [
-      ...previous,
-      {
-        id: nextId,
-        area_id: selectedArea.id,
-        group_type_id: Number(groupForm.group_type_id),
-        descripcion: groupForm.descripcion.trim(),
-        abreviacion: groupForm.abreviacion.trim()
+
+    void (async () => {
+      setIsSubmitting(true);
+      setErrorMessage("");
+      try {
+        await apiPost(config.endpoints.groups.create, {
+          area_id: selectedArea.id,
+          group_type_id: Number(groupForm.group_type_id),
+          descripcion: groupForm.descripcion.trim()
+        });
+        await loadAreasData();
+        setGroupForm(emptyGroupForm);
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo crear el grupo."));
+      } finally {
+        setIsSubmitting(false);
       }
-    ]);
-    setGroupForm(emptyGroupForm);
-    setErrorMessage("");
+    })();
   };
 
   const updateGroupInline = (group: GroupRecord) => {
+    if (isSubmitting) return;
     const descripcion = window.prompt("Nueva descripcion del grupo:", group.descripcion);
     if (descripcion === null) return;
     const abreviacion = window.prompt("Nueva abreviacion:", group.abreviacion);
     if (abreviacion === null) return;
-    setGroups((previous) => previous.map((item) => (item.id === group.id ? { ...item, descripcion: descripcion.trim(), abreviacion: abreviacion.trim() } : item)));
+
+    void (async () => {
+      setIsSubmitting(true);
+      try {
+        await apiPut(withId(config.endpoints.groups.update, group.id), {
+          descripcion: descripcion.trim(),
+          abreviacion: abreviacion.trim() || undefined
+        });
+        await loadAreasData();
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo actualizar el grupo."));
+      } finally {
+        setIsSubmitting(false);
+      }
+    })();
   };
 
   const deleteGroup = (groupId: number) => {
+    if (isSubmitting) return;
     if ((subgroupsByGroup.get(groupId)?.length ?? 0) > 0) return;
     if (!window.confirm("Eliminar este grupo?")) return;
-    setGroups((previous) => previous.filter((group) => group.id !== groupId));
+
+    void (async () => {
+      setIsSubmitting(true);
+      try {
+        await apiDelete(withId(config.endpoints.groups.delete, groupId));
+        await loadAreasData();
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo eliminar el grupo."));
+      } finally {
+        setIsSubmitting(false);
+      }
+    })();
   };
 
   const subgroupFormForGroup = (groupId: number): SubgroupForm => subgroupForms[groupId] ?? emptySubgroupForm;
@@ -334,39 +408,60 @@ export default function AreasModule() {
 
   const submitCreateSubgroup = (event: FormEvent<HTMLFormElement>, groupId: number) => {
     event.preventDefault();
+    if (isSubmitting) return;
     const form = subgroupFormForGroup(groupId);
     if (!form.descripcion.trim()) {
       setErrorMessage("Ingrese la descripcion del subgrupo.");
       return;
     }
-    const nextId = subgroups.length ? Math.max(...subgroups.map((item) => item.id)) + 1 : 1;
-    setSubgroups((previous) => [
-      ...previous,
-      {
-        id: nextId,
-        group_id: groupId,
-        descripcion: form.descripcion.trim(),
-        abreviacion: form.abreviacion.trim(),
-        parent_subgroup_id: form.parent_subgroup_id ? Number(form.parent_subgroup_id) : null
+
+    void (async () => {
+      setIsSubmitting(true);
+      setErrorMessage("");
+      try {
+        await apiPost(config.endpoints.subgroups.create, {
+          group_id: groupId,
+          descripcion: form.descripcion.trim(),
+          abreviacion: form.abreviacion.trim() || undefined,
+          parent_subgroup_id: form.parent_subgroup_id ? Number(form.parent_subgroup_id) : undefined
+        });
+        await loadAreasData();
+        setSubgroupFormForGroup(groupId, emptySubgroupForm);
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo crear el subgrupo."));
+      } finally {
+        setIsSubmitting(false);
       }
-    ]);
-    setSubgroupFormForGroup(groupId, emptySubgroupForm);
-    setErrorMessage("");
+    })();
   };
 
   const deleteSubgroup = (subgroupId: number) => {
+    if (isSubmitting) return;
     const hasChildren = subgroups.some((item) => item.parent_subgroup_id === subgroupId);
-    if (hasChildren) {
-      if (!window.confirm("Este subgrupo tiene hijos. Eliminarlos tambien?")) return;
-      const collectChildren = (parentId: number): number[] => {
-        const direct = subgroups.filter((item) => item.parent_subgroup_id === parentId).map((item) => item.id);
-        return [...direct, ...direct.flatMap((id) => collectChildren(id))];
-      };
-      const allChildren = collectChildren(subgroupId);
-      setSubgroups((previous) => previous.filter((item) => item.id !== subgroupId && !allChildren.includes(item.id)));
-      return;
-    }
-    setSubgroups((previous) => previous.filter((item) => item.id !== subgroupId));
+    if (hasChildren && !window.confirm("Este subgrupo tiene hijos. Eliminarlos tambien?")) return;
+
+    void (async () => {
+      setIsSubmitting(true);
+      try {
+        const deletionOrder: number[] = [];
+        const collectForDeletion = (nodeId: number) => {
+          subgroups
+            .filter((item) => item.parent_subgroup_id === nodeId)
+            .forEach((child) => collectForDeletion(child.id));
+          deletionOrder.push(nodeId);
+        };
+        collectForDeletion(subgroupId);
+
+        for (const id of deletionOrder) {
+          await apiDelete(withId(config.endpoints.subgroups.delete, id));
+        }
+        await loadAreasData();
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo eliminar el subgrupo."));
+      } finally {
+        setIsSubmitting(false);
+      }
+    })();
   };
 
   const groupsForSelectedArea = selectedArea ? groups.filter((group) => group.area_id === selectedArea.id) : [];

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { config, withParams } from "@/config/llapiy-config";
-import { apiGet, toList, unwrapData } from "@/lib/llapiy-api";
+import { apiDelete, apiGet, apiPost, apiPut, toList, unwrapData } from "@/lib/llapiy-api";
 import {
   type Andamio,
   type Archivo,
@@ -41,6 +41,16 @@ const archivosPath = (sectionId: number, andamioId: number, boxId: number) =>
 
 const toValidId = (value: number | undefined) =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const maybeMessage = (error as { message?: unknown }).message;
+    if (typeof maybeMessage === "string" && maybeMessage.trim()) {
+      return maybeMessage;
+    }
+  }
+  return fallback;
+}
 
 function resolveViewFromProps(
   initialLevel: StorageLevel,
@@ -149,6 +159,7 @@ export default function StorageModule({
   const [editingAndamio, setEditingAndamio] = useState<Andamio | null>(null);
   const [editingBox, setEditingBox] = useState<Box | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
   const initialView = useMemo(
     () => resolveViewFromProps(initialLevel, sectionId, andamioId, boxId),
     [andamioId, boxId, initialLevel, sectionId]
@@ -256,7 +267,9 @@ export default function StorageModule({
           }
         }
       } catch (error) {
-        console.error("[StorageModule] Load error:", error);
+        if (!ignore) {
+          setErrorMessage(getApiErrorMessage(error, "No se pudo cargar el modulo de almacenamiento."));
+        }
       } finally {
         if (!ignore) setIsLoading(false);
       }
@@ -266,7 +279,7 @@ export default function StorageModule({
     return () => {
       ignore = true;
     };
-  }, [search, view]);
+  }, [reloadKey, search, view]);
 
   const sectionMap = useMemo(() => new Map(sections.map((section) => [section.id, section])), [sections]);
   const andamioMap = useMemo(() => new Map(andamios.map((andamio) => [andamio.id, andamio])), [andamios]);
@@ -336,12 +349,18 @@ export default function StorageModule({
       setErrorMessage("Complete numero y descripcion de la seccion.");
       return;
     }
-    const nextId = sections.length ? Math.max(...sections.map((section) => section.id)) + 1 : 1;
-    setSections((previous) => [
-      ...previous,
-      { id: nextId, n_section: Number(sectionForm.n_section), descripcion: sectionForm.descripcion.trim() }
-    ]);
-    setSectionForm(emptySectionForm);
+    void (async () => {
+      try {
+        await apiPost(config.endpoints.storage.sections, {
+          n_section: sectionForm.n_section,
+          descripcion: sectionForm.descripcion.trim()
+        });
+        setSectionForm(emptySectionForm);
+        setReloadKey((previous) => previous + 1);
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo crear la seccion."));
+      }
+    })();
   };
 
   const openEditSection = (section: Section) => {
@@ -357,22 +376,42 @@ export default function StorageModule({
       setErrorMessage("Complete numero y descripcion de la seccion.");
       return;
     }
-    setSections((previous) =>
-      previous.map((section) =>
-        section.id === editingSection.id
-          ? { ...section, n_section: Number(sectionForm.n_section), descripcion: sectionForm.descripcion.trim() }
-          : section
-      )
-    );
-    setSectionEditOpen(false);
-    setEditingSection(null);
-    setSectionForm(emptySectionForm);
+    void (async () => {
+      try {
+        await apiPut(
+          withParams(config.endpoints.storage.sectionById, {
+            section: editingSection.id
+          }),
+          {
+            n_section: sectionForm.n_section,
+            descripcion: sectionForm.descripcion.trim()
+          }
+        );
+        setSectionEditOpen(false);
+        setEditingSection(null);
+        setSectionForm(emptySectionForm);
+        setReloadKey((previous) => previous + 1);
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo actualizar la seccion."));
+      }
+    })();
   };
 
   const deleteSection = (sectionId: number) => {
     if ((andamiosBySectionCount.get(sectionId) ?? 0) > 0) return;
     if (!window.confirm("Seguro de eliminar esta seccion?")) return;
-    setSections((previous) => previous.filter((section) => section.id !== sectionId));
+    void (async () => {
+      try {
+        await apiDelete(
+          withParams(config.endpoints.storage.sectionById, {
+            section: sectionId
+          })
+        );
+        setReloadKey((previous) => previous + 1);
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo eliminar la seccion."));
+      }
+    })();
   };
 
   const createAndamio = (event: FormEvent<HTMLFormElement>) => {
@@ -383,17 +422,23 @@ export default function StorageModule({
       setErrorMessage("Complete numero y descripcion del andamio.");
       return;
     }
-    const nextId = andamios.length ? Math.max(...andamios.map((andamio) => andamio.id)) + 1 : 1;
-    setAndamios((previous) => [
-      ...previous,
-      {
-        id: nextId,
-        section_id: view.sectionId,
-        n_andamio: Number(andamioForm.n_andamio),
-        descripcion: andamioForm.descripcion.trim()
+    void (async () => {
+      try {
+        await apiPost(
+          withParams(config.endpoints.storage.andamios, {
+            section: view.sectionId
+          }),
+          {
+            n_andamio: Number(andamioForm.n_andamio),
+            descripcion: andamioForm.descripcion.trim()
+          }
+        );
+        setAndamioForm(emptyAndamioForm);
+        setReloadKey((previous) => previous + 1);
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo crear el andamio."));
       }
-    ]);
-    setAndamioForm(emptyAndamioForm);
+    })();
   };
 
   const openEditAndamio = (andamio: Andamio) => {
@@ -409,22 +454,47 @@ export default function StorageModule({
       setErrorMessage("Complete numero y descripcion del andamio.");
       return;
     }
-    setAndamios((previous) =>
-      previous.map((andamio) =>
-        andamio.id === editingAndamio.id
-          ? { ...andamio, n_andamio: Number(andamioForm.n_andamio), descripcion: andamioForm.descripcion.trim() }
-          : andamio
-      )
-    );
-    setAndamioEditOpen(false);
-    setEditingAndamio(null);
-    setAndamioForm(emptyAndamioForm);
+    void (async () => {
+      try {
+        await apiPut(
+          withParams(config.endpoints.storage.andamioById, {
+            section: editingAndamio.section_id,
+            andamio: editingAndamio.id
+          }),
+          {
+            n_andamio: Number(andamioForm.n_andamio),
+            descripcion: andamioForm.descripcion.trim()
+          }
+        );
+        setAndamioEditOpen(false);
+        setEditingAndamio(null);
+        setAndamioForm(emptyAndamioForm);
+        setReloadKey((previous) => previous + 1);
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo actualizar el andamio."));
+      }
+    })();
   };
 
   const deleteAndamio = (andamioId: number) => {
     if ((boxesByAndamioCount.get(andamioId) ?? 0) > 0) return;
     if (!window.confirm("Seguro de eliminar este andamio?")) return;
-    setAndamios((previous) => previous.filter((andamio) => andamio.id !== andamioId));
+    const andamio = andamios.find((item) => item.id === andamioId);
+    if (!andamio) return;
+
+    void (async () => {
+      try {
+        await apiDelete(
+          withParams(config.endpoints.storage.andamioById, {
+            section: andamio.section_id,
+            andamio: andamio.id
+          })
+        );
+        setReloadKey((previous) => previous + 1);
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo eliminar el andamio."));
+      }
+    })();
   };
 
   const createBox = (event: FormEvent<HTMLFormElement>) => {
@@ -435,17 +505,23 @@ export default function StorageModule({
       setErrorMessage("Ingrese el numero de caja.");
       return;
     }
-    const nextId = boxes.length ? Math.max(...boxes.map((box) => box.id)) + 1 : 1;
-    setBoxes((previous) => [
-      ...previous,
-      {
-        id: nextId,
-        andamio_id: view.andamioId,
-        n_box: Number(boxForm.n_box),
-        descripcion: boxForm.descripcion.trim() || "Caja sin descripcion"
+    void (async () => {
+      try {
+        await apiPost(
+          withParams(config.endpoints.storage.boxes, {
+            section: view.sectionId,
+            andamio: view.andamioId
+          }),
+          {
+            n_box: boxForm.n_box
+          }
+        );
+        setBoxForm(emptyBoxForm);
+        setReloadKey((previous) => previous + 1);
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo crear la caja."));
       }
-    ]);
-    setBoxForm(emptyBoxForm);
+    })();
   };
 
   const openEditBox = (box: Box) => {
@@ -461,29 +537,67 @@ export default function StorageModule({
       setErrorMessage("Ingrese el numero de caja.");
       return;
     }
-    setBoxes((previous) =>
-      previous.map((box) =>
-        box.id === editingBox.id
-          ? { ...box, n_box: Number(boxForm.n_box), descripcion: boxForm.descripcion.trim() || box.descripcion }
-          : box
-      )
-    );
-    setBoxEditOpen(false);
-    setEditingBox(null);
-    setBoxForm(emptyBoxForm);
+    if (view.level !== "boxes" && view.level !== "archivos") return;
+    void (async () => {
+      try {
+        await apiPut(
+          withParams(config.endpoints.storage.boxById, {
+            section: view.sectionId,
+            andamio: editingBox.andamio_id,
+            box: editingBox.id
+          }),
+          {
+            n_box: boxForm.n_box
+          }
+        );
+        setBoxEditOpen(false);
+        setEditingBox(null);
+        setBoxForm(emptyBoxForm);
+        setReloadKey((previous) => previous + 1);
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo actualizar la caja."));
+      }
+    })();
   };
 
   const deleteBox = (boxId: number) => {
     if ((archivosByBoxCount.get(boxId) ?? 0) > 0) return;
     if (!window.confirm("Seguro de eliminar esta caja?")) return;
-    setBoxes((previous) => previous.filter((box) => box.id !== boxId));
+    if (view.level !== "boxes" && view.level !== "archivos") return;
+    void (async () => {
+      try {
+        await apiDelete(
+          withParams(config.endpoints.storage.boxById, {
+            section: view.sectionId,
+            andamio: view.andamioId,
+            box: boxId
+          })
+        );
+        setReloadKey((previous) => previous + 1);
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo eliminar la caja."));
+      }
+    })();
   };
 
   const removeArchivoFromStorage = (archivoId: number) => {
     if (!window.confirm("Seguro de retirar este archivo?")) return;
-    setArchivos((previous) =>
-      previous.map((archivo) => (archivo.id === archivoId ? { ...archivo, box_id: null } : archivo))
-    );
+    if (view.level !== "archivos") return;
+    void (async () => {
+      try {
+        await apiPost(
+          withParams(config.endpoints.storage.moveArchivo, {
+            section: view.sectionId,
+            andamio: view.andamioId,
+            box: view.boxId,
+            block: archivoId
+          })
+        );
+        setReloadKey((previous) => previous + 1);
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error, "No se pudo retirar el archivo del almacen."));
+      }
+    })();
   };
 
   const titleByLevel = {
