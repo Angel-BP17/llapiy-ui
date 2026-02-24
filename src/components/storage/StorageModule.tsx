@@ -8,6 +8,7 @@ import {
   type Box,
   type Section
 } from "./storage-data";
+import { Boxes, Eye, FileArchive, Layers, LayoutGrid, Pencil, Trash2 } from "lucide-react";
 
 type ViewState =
   | { level: "sections" }
@@ -524,8 +525,15 @@ export default function StorageModule({
         <>
           <div className="grid gap-3 sm:grid-cols-1">
             <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-              <p className="text-xs text-muted-foreground">Secciones registradas</p>
-              <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : sections.length}</p>
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <LayoutGrid className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Secciones registradas</p>
+                  <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : sections.length}</p>
+                </div>
+              </div>
             </article>
           </div>
 
@@ -564,10 +572,12 @@ export default function StorageModule({
                   <h4 className="text-base font-semibold text-foreground">Seccion {section.n_section}</h4>
                   <p className="mt-2 text-sm text-muted-foreground">Descripcion: {section.descripcion}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <a href={andamiosPath(section.id)} className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                    <a href={andamiosPath(section.id)} className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                      <Eye className="h-3.5 w-3.5" />
                       Ver andamios
                     </a>
-                    <button type="button" onClick={() => openEditSection(section)} className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                    <button type="button" onClick={() => openEditSection(section)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                      <Pencil className="h-3.5 w-3.5" />
                       Editar
                     </button>
                     <button
@@ -575,8 +585,9 @@ export default function StorageModule({
                       onClick={() => deleteSection(section.id)}
                       disabled={(andamiosBySectionCount.get(section.id) ?? 0) > 0}
                       title={(andamiosBySectionCount.get(section.id) ?? 0) > 0 ? "No se puede eliminar porque tiene andamios asociados" : ""}
-                      className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                     >
+                      <Trash2 className="h-3.5 w-3.5" />
                       Eliminar
                     </button>
                   </div>
@@ -595,8 +606,15 @@ export default function StorageModule({
         <>
           <div className="grid gap-3 sm:grid-cols-1">
             <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-              <p className="text-xs text-muted-foreground">Andamios registrados</p>
-              <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : andamiosFiltered.length}</p>
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <Layers className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Andamios registrados</p>
+                  <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : andamiosFiltered.length}</p>
+                </div>
+              </div>
             </article>
           </div>
 
@@ -641,10 +659,12 @@ export default function StorageModule({
                   <h4 className="text-base font-semibold text-foreground">Andamio {andamio.n_andamio}</h4>
                   <p className="mt-2 text-sm text-muted-foreground">Descripcion: {andamio.descripcion}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <a href={boxesPath(andamio.section_id, andamio.id)} className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                    <a href={boxesPath(andamio.section_id, andamio.id)} className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                      <Eye className="h-3.5 w-3.5" />
                       Ver cajas
                     </a>
-                    <button type="button" onClick={() => openEditAndamio(andamio)} className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                    <button type="button" onClick={() => openEditAndamio(andamio)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                      <Pencil className="h-3.5 w-3.5" />
                       Editar
                     </button>
                     <button
@@ -652,8 +672,9 @@ export default function StorageModule({
                       onClick={() => deleteAndamio(andamio.id)}
                       disabled={(boxesByAndamioCount.get(andamio.id) ?? 0) > 0}
                       title={(boxesByAndamioCount.get(andamio.id) ?? 0) > 0 ? "No se puede eliminar porque tiene cajas asociadas" : ""}
-                      className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                     >
+                      <Trash2 className="h-3.5 w-3.5" />
                       Eliminar
                     </button>
                   </div>
@@ -672,8 +693,15 @@ export default function StorageModule({
         <>
           <div className="grid gap-3 sm:grid-cols-1">
             <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-              <p className="text-xs text-muted-foreground">Cajas registradas</p>
-              <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : boxesFiltered.length}</p>
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <Boxes className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Cajas registradas</p>
+                  <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : boxesFiltered.length}</p>
+                </div>
+              </div>
             </article>
           </div>
 
@@ -718,10 +746,12 @@ export default function StorageModule({
                   <h4 className="text-base font-semibold text-foreground">Caja {box.n_box}</h4>
                   <p className="mt-2 text-sm text-muted-foreground">{box.descripcion}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <a href={archivosPath(view.sectionId, view.andamioId, box.id)} className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                    <a href={archivosPath(view.sectionId, view.andamioId, box.id)} className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                      <Eye className="h-3.5 w-3.5" />
                       Ver archivos
                     </a>
-                    <button type="button" onClick={() => openEditBox(box)} className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                    <button type="button" onClick={() => openEditBox(box)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                      <Pencil className="h-3.5 w-3.5" />
                       Editar
                     </button>
                     <button
@@ -729,8 +759,9 @@ export default function StorageModule({
                       onClick={() => deleteBox(box.id)}
                       disabled={(archivosByBoxCount.get(box.id) ?? 0) > 0}
                       title={(archivosByBoxCount.get(box.id) ?? 0) > 0 ? "No se puede eliminar porque tiene archivos asociados" : ""}
-                      className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                     >
+                      <Trash2 className="h-3.5 w-3.5" />
                       Eliminar
                     </button>
                   </div>
@@ -749,8 +780,15 @@ export default function StorageModule({
         <>
           <div className="grid gap-3 sm:grid-cols-1">
             <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-              <p className="text-xs text-muted-foreground">Archivos en caja</p>
-              <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : archivosFiltered.length}</p>
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <FileArchive className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Archivos en caja</p>
+                  <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : archivosFiltered.length}</p>
+                </div>
+              </div>
             </article>
           </div>
 
@@ -799,7 +837,8 @@ export default function StorageModule({
                         <td className="px-4 py-3">{archivo.periodo}</td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-2">
-                            <a href="/bloques" className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                            <a href="/bloques" className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                              <Eye className="h-3.5 w-3.5" />
                               Ver documento
                             </a>
                             <button type="button" onClick={() => removeArchivoFromStorage(archivo.id)} className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white">

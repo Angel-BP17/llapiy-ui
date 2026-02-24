@@ -15,6 +15,15 @@ export type ApiError = Error & {
   payload?: unknown;
 };
 
+export type PaginationMeta = {
+  currentPage: number;
+  lastPage: number;
+  perPage: number;
+  total: number;
+  from: number;
+  to: number;
+};
+
 const authTokenKey = "llapiy_auth_token";
 
 function toQueryString(query?: QueryParams) {
@@ -158,11 +167,57 @@ export function toList<T>(value: unknown): T[] {
   return [];
 }
 
+export function getPaginationMeta(value: unknown): PaginationMeta {
+  if (typeof value !== "object" || value === null) {
+    return {
+      currentPage: 1,
+      lastPage: 1,
+      perPage: 0,
+      total: 0,
+      from: 0,
+      to: 0
+    };
+  }
+
+  const record = value as {
+    current_page?: unknown;
+    last_page?: unknown;
+    per_page?: unknown;
+    total?: unknown;
+    from?: unknown;
+    to?: unknown;
+    data?: unknown;
+  };
+
+  const list = Array.isArray(record.data) ? record.data : [];
+  const currentPage = Number(record.current_page ?? 1) || 1;
+  const lastPage = Number(record.last_page ?? 1) || 1;
+  const perPage = Number(record.per_page ?? list.length) || list.length;
+  const total = Number(record.total ?? list.length) || list.length;
+  const from = Number(record.from ?? (list.length ? (currentPage - 1) * perPage + 1 : 0)) || 0;
+  const to = Number(record.to ?? (list.length ? from + list.length - 1 : 0)) || 0;
+
+  return {
+    currentPage,
+    lastPage,
+    perPage,
+    total,
+    from,
+    to
+  };
+}
+
 export async function downloadWebReport(
   path: string,
   query?: QueryParams,
   fallbackName = "reporte.pdf"
 ) {
+  const reportWindow = window.open("", "_blank");
+  if (reportWindow) {
+    reportWindow.document.title = fallbackName;
+    reportWindow.document.body.innerHTML = "<p style='font-family: sans-serif; padding: 16px;'>Generando reporte...</p>";
+  }
+
   const token = getAuthToken();
   const headers = new Headers();
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -185,11 +240,13 @@ export async function downloadWebReport(
   const filename = decodeURIComponent(filenameFromHeader || fallbackName);
 
   const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  if (reportWindow) {
+    reportWindow.location.href = url;
+  } else {
+    URL.revokeObjectURL(url);
+    throw new Error(`No se pudo abrir la pestana para ${filename}. Verifica el bloqueador de popups.`);
+  }
+
+  // Mantener la URL temporal viva el tiempo suficiente para visualizar el PDF en la pestana.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

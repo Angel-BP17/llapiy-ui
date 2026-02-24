@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
 import { config, withId } from "@/config/llapiy-config";
-import { apiDelete, apiGet, apiPost, apiPut, toList, unwrapData } from "@/lib/llapiy-api";
+import { apiDelete, apiGet, apiPost, apiPut, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
+import { ListChecks, Pencil, Plus, Trash2 } from "lucide-react";
 
 type DataType = "string" | "text" | "char" | "int" | "float" | "double" | "boolean" | "enum";
 
@@ -38,6 +39,7 @@ const emptyForm: CampoForm = {
   allow_zero: true,
   enum_values_text: ""
 };
+const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 function Modal({
   open,
@@ -249,6 +251,8 @@ export default function CamposModule() {
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationMeta>(emptyPagination);
+  const [totalCamposCount, setTotalCamposCount] = useState(0);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -258,13 +262,17 @@ export default function CamposModule() {
   const [createError, setCreateError] = useState("");
   const [editError, setEditError] = useState("");
 
-  const loadCampos = async (searchValue = "") => {
+  const loadCampos = async (searchValue = "", pageValue = currentPage) => {
     setIsLoading(true);
     try {
-      const response = await apiGet<{ campos: { data: any[] } | any[] }>(config.endpoints.campos.list, {
-        search: searchValue || undefined
+      const response = await apiGet<{
+        campos: { data: any[] } | any[];
+        totalCampos?: number;
+      }>(config.endpoints.campos.list, {
+        search: searchValue || undefined,
+        page: pageValue
       });
-      const data = unwrapData(response) as { campos?: unknown };
+      const data = unwrapData(response) as { campos?: unknown; totalCampos?: unknown };
       const next = toList<any>(data?.campos).map((item) => ({
         id: Number(item?.id ?? 0),
         name: String(item?.name ?? ""),
@@ -277,26 +285,22 @@ export default function CamposModule() {
         document_types_count: Number(item?.document_types_count ?? item?.document_types_count ?? 0)
       }));
       setCampos(next);
+      const nextPagination = getPaginationMeta(data?.campos);
+      setPagination(nextPagination);
+      setTotalCamposCount(Number(data?.totalCampos ?? nextPagination.total ?? 0));
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    void loadCampos(appliedSearch).catch((error) => {
+    void loadCampos(appliedSearch, currentPage).catch((error) => {
       console.error("[CamposModule] Load error:", error);
     });
-  }, [appliedSearch]);
+  }, [appliedSearch, currentPage]);
 
-  const filteredCampos = useMemo(() => {
-    const query = appliedSearch.trim().toLowerCase();
-    if (!query) return campos;
-    return campos.filter((campo) => campo.name.toLowerCase().includes(query));
-  }, [campos, appliedSearch]);
-
-  const pageSize = 8;
-  const totalPages = Math.max(1, Math.ceil(filteredCampos.length / pageSize));
-  const paginatedCampos = filteredCampos.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const totalPages = Math.max(1, pagination.lastPage);
+  const paginatedCampos = campos;
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -328,7 +332,7 @@ export default function CamposModule() {
           allow_zero: createForm.allow_zero,
           enum_values: createForm.enum_values_text || undefined
         });
-        await loadCampos(appliedSearch);
+        await loadCampos(appliedSearch, currentPage);
         setCreateOpen(false);
         setCreateForm(emptyForm);
         setCreateError("");
@@ -365,7 +369,7 @@ export default function CamposModule() {
           allow_zero: editForm.allow_zero,
           enum_values: editForm.enum_values_text || undefined
         });
-        await loadCampos(appliedSearch);
+        await loadCampos(appliedSearch, currentPage);
         setEditOpen(false);
         setSelected(null);
         setEditError("");
@@ -388,7 +392,7 @@ export default function CamposModule() {
     void (async () => {
       try {
         await apiDelete(withId(config.endpoints.campos.delete, campo.id));
-        await loadCampos(appliedSearch);
+        await loadCampos(appliedSearch, currentPage);
       } catch (error) {
         console.error("[CamposModule] Delete error:", error);
         window.alert("No se pudo eliminar el campo.");
@@ -405,14 +409,21 @@ export default function CamposModule() {
             <h2 className="mt-2 text-2xl font-semibold">Campos adicionales</h2>
             <p className="mt-1 text-sm text-white/75">Configura campos reutilizables para la gestion documental.</p>
           </div>
-          <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold">{isLoading ? <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" /> : `${filteredCampos.length} registros`}</span>
+          <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold">{isLoading ? <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" /> : `${pagination.total} registros`}</span>
         </div>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Total de campos</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : campos.length}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <ListChecks className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total de campos</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : totalCamposCount}</p>
+            </div>
+          </div>
         </article>
       </div>
 
@@ -430,7 +441,8 @@ export default function CamposModule() {
               </button>
             </div>
           </div>
-          <button type="button" onClick={() => { setCreateError(""); setCreateForm(emptyForm); setCreateOpen(true); }} className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white">
+          <button type="button" onClick={() => { setCreateError(""); setCreateForm(emptyForm); setCreateOpen(true); }} className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white">
+            <Plus className="h-4 w-4" />
             Crear nuevo campo
           </button>
         </div>
@@ -460,7 +472,7 @@ export default function CamposModule() {
               ) : paginatedCampos.length ? (
                 paginatedCampos.map((campo, index) => (
                   <tr key={campo.id} className="border-t border-border">
-                    <td className="px-4 py-3">{(currentPage - 1) * pageSize + index + 1}</td>
+                    <td className="px-4 py-3">{(pagination.from || 1) + index}</td>
                     <td className="px-4 py-3 font-semibold text-foreground">{campo.name}</td>
                     <td className="px-4 py-3">
                       <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-semibold uppercase text-sky-700">
@@ -475,7 +487,8 @@ export default function CamposModule() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => openEdit(campo)} className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                        <button type="button" onClick={() => openEdit(campo)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                          <Pencil className="h-3.5 w-3.5" />
                           Editar
                         </button>
                         <button
@@ -483,8 +496,9 @@ export default function CamposModule() {
                           onClick={() => deleteCampo(campo)}
                           disabled={campo.document_types_count > 0}
                           title={campo.document_types_count > 0 ? "No se puede eliminar porque tiene tipos de documentos asociados" : ""}
-                          className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                         >
+                          <Trash2 className="h-3.5 w-3.5" />
                           Eliminar
                         </button>
                       </div>
@@ -505,7 +519,7 @@ export default function CamposModule() {
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
         <p className="text-muted-foreground">
-          Mostrando {paginatedCampos.length} de {filteredCampos.length} campos
+          Mostrando {paginatedCampos.length} de {pagination.total} campos
         </p>
         <div className="flex items-center gap-2">
           <button type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">

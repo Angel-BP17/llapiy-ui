@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { config, withId } from "@/config/llapiy-config";
-import { apiDelete, apiGet, apiPost, apiPut, downloadWebReport, toList, unwrapData } from "@/lib/llapiy-api";
+import { apiDelete, apiGet, apiPost, apiPut, downloadWebReport, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
 import { useAuthPermissions } from "@/lib/use-auth-permissions";
+import { Eye, FileDown, FileText, Pencil, Plus, Tags, Trash2 } from "lucide-react";
 
 type CampoType = { id: number; name: string; data_type: "string" | "text" | "int" | "boolean" | "enum"; is_nullable?: boolean; enum_values?: string[] };
 type DocType = { id: number; name: string; campo_types: CampoType[] };
@@ -45,6 +46,8 @@ const months = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", 
 const docTypes: DocType[] = [];
 
 const empty: FormState = { document_type_id: "", n_documento: "", asunto: "", folios: "", fecha: "", root_url: "", area_id: "", group_id: "", subgroup_id: "", role_id: "", campos: {} };
+const emptyFilters = { asunto: "", document_type_id: "", area_id: "", group_id: "", subgroup_id: "", role_id: "", year: "", month: "" };
+const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 function mapApiDocument(item: any): Doc {
   const campos: Campo[] = Array.isArray(item?.campos)
@@ -91,6 +94,7 @@ const getType = (id: string) => docTypes.find((x) => String(x.id) === id) ?? nul
 
 async function downloadDocumentsReport(filters: {
   asunto: string;
+  document_type_id: string;
   area_id: string;
   group_id: string;
   subgroup_id: string;
@@ -101,12 +105,13 @@ async function downloadDocumentsReport(filters: {
   try {
     await downloadWebReport(
       config.endpoints.documents.pdf,
-      {
-        asunto: filters.asunto || undefined,
-        area_id: filters.area_id || undefined,
-        group_id: filters.group_id || undefined,
-        subgroup_id: filters.subgroup_id || undefined,
-        role_id: filters.role_id || undefined,
+        {
+          asunto: filters.asunto || undefined,
+          document_type_id: filters.document_type_id || undefined,
+          area_id: filters.area_id || undefined,
+          group_id: filters.group_id || undefined,
+          subgroup_id: filters.subgroup_id || undefined,
+          role_id: filters.role_id || undefined,
         year: filters.year || undefined,
         month: filters.month || undefined
       },
@@ -121,8 +126,12 @@ async function downloadDocumentsReport(filters: {
 export default function DocumentsModule() {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [f, setF] = useState({ asunto: "", document_type_id: "", area_id: "", group_id: "", subgroup_id: "", role_id: "", year: "", month: "" });
+  const [f, setF] = useState(emptyFilters);
+  const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
   const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationMeta>(emptyPagination);
+  const [years, setYears] = useState<number[]>([]);
+  const [totalDocuments, setTotalDocuments] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [showOpen, setShowOpen] = useState(false);
@@ -137,29 +146,46 @@ export default function DocumentsModule() {
 
   const canUploadDocument = canByPermission("documents.upload");
 
-  const loadDocuments = async () => {
+  const loadDocuments = async (filtersValue = appliedFilters, pageValue = page) => {
     setIsLoading(true);
     try {
       const response = await apiGet<{
         documents: { data: any[] } | any[];
         documentTypes?: any[];
+        createDocumentTypes?: any[];
         document_types?: any[];
         areas?: any[];
         groups?: any[];
         subgroups?: any[];
         roles?: any[];
-      }>(config.endpoints.documents.list);
+        years?: (number | string)[];
+        totalDocuments?: number;
+      }>(config.endpoints.documents.list, {
+        asunto: filtersValue.asunto || undefined,
+        document_type_id: filtersValue.document_type_id || undefined,
+        area_id: filtersValue.area_id || undefined,
+        group_id: filtersValue.group_id || undefined,
+        subgroup_id: filtersValue.subgroup_id || undefined,
+        role_id: filtersValue.role_id || undefined,
+        year: filtersValue.year || undefined,
+        month: filtersValue.month || undefined,
+        page: pageValue
+      });
       const data = unwrapData(response) as {
         documents?: unknown;
         documentTypes?: unknown;
+        createDocumentTypes?: unknown;
         document_types?: unknown;
         areas?: unknown;
         groups?: unknown;
         subgroups?: unknown;
         roles?: unknown;
+        years?: unknown;
+        totalDocuments?: unknown;
       };
+      const nextPagination = getPaginationMeta(data?.documents);
       const next = toList<any>(data?.documents).map(mapApiDocument).filter((item) => item.id > 0);
-      const nextDocTypes = toList<any>(data?.documentTypes ?? data?.document_types).map((item) => ({
+      const nextDocTypes = toList<any>(data?.createDocumentTypes ?? data?.documentTypes ?? data?.document_types).map((item) => ({
         id: Number(item?.id ?? 0),
         name: String(item?.name ?? ""),
         campo_types: toList<any>(item?.campo_types ?? item?.campoTypes).map((campo) => ({
@@ -193,6 +219,14 @@ export default function DocumentsModule() {
       subgroups.splice(0, subgroups.length, ...nextSubgroups);
       roles.splice(0, roles.length, ...nextRoles);
       setDocs(next);
+      setPagination(nextPagination);
+      setYears(
+        toList<any>(data?.years)
+          .map((value) => Number(value ?? 0))
+          .filter((value) => value > 0)
+          .sort((a, b) => b - a)
+      );
+      setTotalDocuments(Number(data?.totalDocuments ?? nextPagination.total ?? 0));
     } finally {
       setIsLoading(false);
     }
@@ -201,37 +235,21 @@ export default function DocumentsModule() {
   useEffect(() => {
     const load = async () => {
       try {
-        await loadDocuments();
+        await loadDocuments(appliedFilters, page);
       } catch (error) {
         console.error("[DocumentsModule] Load error:", error);
       }
     };
 
     void load();
-  }, []);
+  }, [appliedFilters, page]);
 
-  const filtered = useMemo(
-    () =>
-      docs.filter((d) => {
-        const dt = new Date(d.fecha);
-        return (
-          (!f.asunto || d.asunto.toLowerCase().includes(f.asunto.toLowerCase())) &&
-          (!f.document_type_id || String(d.document_type_id) === f.document_type_id) &&
-          (!f.area_id || String(d.area_id) === f.area_id) &&
-          (!f.group_id || String(d.group_id) === f.group_id) &&
-          (!f.subgroup_id || String(d.subgroup_id) === f.subgroup_id) &&
-          (!f.role_id || String(d.role_id) === f.role_id) &&
-          (!f.year || String(dt.getFullYear()) === f.year) &&
-          (!f.month || String(dt.getMonth() + 1) === f.month)
-        );
-      }),
-    [docs, f]
-  );
+  const rows = docs;
+  const totalPages = Math.max(1, pagination.lastPage);
 
-  const years = useMemo(() => [...new Set(docs.map((d) => new Date(d.fecha).getFullYear()))].sort((a, b) => b - a), [docs]);
-  const pageSize = 8;
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const rows = filtered.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const validate = (form: FormState) => {
     if (!form.document_type_id) return "Seleccione un tipo de documento.";
@@ -265,7 +283,7 @@ export default function DocumentsModule() {
             dato: createForm.campos[campoType.id] ?? ""
           }))
         });
-        await loadDocuments();
+        await loadDocuments(appliedFilters, page);
         setCreateErr("");
         setCreateForm(empty);
         setCreateOpen(false);
@@ -308,7 +326,7 @@ export default function DocumentsModule() {
           await apiPut(withId(config.endpoints.documents.upload, sel.id), formData);
         }
 
-        await loadDocuments();
+        await loadDocuments(appliedFilters, page);
         setEditErr("");
         setEditOpen(false);
         setSel(null);
@@ -332,7 +350,7 @@ export default function DocumentsModule() {
     void (async () => {
       try {
         await apiDelete(withId(config.endpoints.documents.delete, document.id));
-        await loadDocuments();
+        await loadDocuments(appliedFilters, page);
       } catch (error) {
         console.error("[DocumentsModule] Delete error:", error);
         window.alert("No se pudo eliminar el documento.");
@@ -365,6 +383,7 @@ export default function DocumentsModule() {
 
   const createType = getType(createForm.document_type_id);
   const editType = getType(editForm.document_type_id);
+  const selectableDocTypes = docTypes.filter((x) => x.name !== "Bloque");
 
   const renderCampo = (c: CampoType, form: FormState, setForm: React.Dispatch<React.SetStateAction<FormState>>) => {
     const value = form.campos[c.id] ?? "";
@@ -396,19 +415,39 @@ export default function DocumentsModule() {
             <p className="text-xs uppercase tracking-[0.24em] text-white/60">Flujo documental</p>
             <h2 className="mt-2 text-2xl font-semibold">Gestion de documentos</h2>
           </div>
-          <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold">{isLoading ? <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" /> : `${filtered.length} registros`}</span>
+          <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold">{isLoading ? <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" /> : `${pagination.total} registros`}</span>
         </div>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <article className="rounded-xl border border-border bg-card p-4 shadow-sm"><p className="text-xs text-muted-foreground">Total de documentos</p><p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : docs.length}</p></article>
-        <article className="rounded-xl border border-border bg-card p-4 shadow-sm"><p className="text-xs text-muted-foreground">Tipos disponibles</p><p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : docTypes.length}</p></article>
+        <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <FileText className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total de documentos</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : totalDocuments}</p>
+            </div>
+          </div>
+        </article>
+        <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Tags className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Tipos disponibles</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : docTypes.length}</p>
+            </div>
+          </div>
+        </article>
       </div>
 
       <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
           <input value={f.asunto} onChange={(e) => setF((p) => ({ ...p, asunto: e.target.value }))} placeholder="Asunto" className="h-10 rounded-lg border border-border bg-background px-3 text-sm" />
-          <select value={f.document_type_id} onChange={(e) => setF((p) => ({ ...p, document_type_id: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Tipo</option>{docTypes.filter((x) => x.name !== "Bloque").map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}</select>
+          <select value={f.document_type_id} onChange={(e) => setF((p) => ({ ...p, document_type_id: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Tipo</option>{selectableDocTypes.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}</select>
           <select value={f.area_id} onChange={(e) => setF((p) => ({ ...p, area_id: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Area</option>{areas.map((x) => <option key={x.id} value={String(x.id)}>{x.descripcion}</option>)}</select>
           <select value={f.role_id} onChange={(e) => setF((p) => ({ ...p, role_id: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Rol</option>{roles.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}</select>
           <select value={f.group_id} onChange={(e) => setF((p) => ({ ...p, group_id: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Grupo</option>{groups.map((x) => <option key={x.id} value={String(x.id)}>{x.descripcion}</option>)}</select>
@@ -417,25 +456,28 @@ export default function DocumentsModule() {
           <select value={f.month} onChange={(e) => setF((p) => ({ ...p, month: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Mes</option>{months.map((m, i) => <option key={m} value={String(i + 1)}>{m}</option>)}</select>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
+          <button type="button" onClick={() => { setPage(1); setAppliedFilters({ ...f }); }} className="h-10 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground">Aplicar filtros</button>
           <button
             type="button"
-            disabled={!docTypes.length}
-            title={!docTypes.length ? "Para ingresar un documento primero debe crear un tipo de documento." : ""}
+            disabled={!selectableDocTypes.length}
+            title={!selectableDocTypes.length ? "Para ingresar un documento primero debe crear un tipo de documento." : ""}
             onClick={() => { setCreateErr(""); setCreateForm(empty); setCreateOpen(true); }}
-            className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
+            <Plus className="h-4 w-4" />
             Ingresar documento
           </button>
           <button
             type="button"
-            disabled={!filtered.length}
-            title={!filtered.length ? "Para generar un reporte debe existir al menos un documento." : ""}
-            onClick={() => void downloadDocumentsReport(f)}
-            className="h-10 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!pagination.total}
+            title={!pagination.total ? "Para generar un reporte debe existir al menos un documento." : ""}
+            onClick={() => void downloadDocumentsReport(appliedFilters)}
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
+            <FileDown className="h-4 w-4" />
             Generar reporte
           </button>
-          <button type="button" onClick={() => setF({ asunto: "", document_type_id: "", area_id: "", group_id: "", subgroup_id: "", role_id: "", year: "", month: "" })} className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground">Limpiar</button>
+          <button type="button" onClick={() => { setF(emptyFilters); setAppliedFilters(emptyFilters); setPage(1); }} className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground">Limpiar</button>
         </div>
       </div>
 
@@ -452,8 +494,23 @@ export default function DocumentsModule() {
                 </tr>
               )) : rows.length ? rows.map((d, i) => (
                 <tr key={d.id} className="border-t border-border">
-                  <td className="px-4 py-3">{(page - 1) * pageSize + i + 1}</td><td className="px-4 py-3 font-semibold text-foreground">{d.n_documento}</td><td className="px-4 py-3">{d.asunto}</td><td className="px-4 py-3">{d.folios || "-"}</td><td className="px-4 py-3">{d.document_type_name}</td>
-                  <td className="px-4 py-3"><div className="flex justify-end gap-2"><button type="button" onClick={() => { setSel(d); setShowOpen(true); }} className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">Ver</button><button type="button" onClick={() => openEdit(d)} className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">Editar</button><button type="button" onClick={() => removeDocument(d)} className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white">Eliminar</button></div></td>
+                  <td className="px-4 py-3">{(pagination.from || 1) + i}</td><td className="px-4 py-3 font-semibold text-foreground">{d.n_documento}</td><td className="px-4 py-3">{d.asunto}</td><td className="px-4 py-3">{d.folios || "-"}</td><td className="px-4 py-3">{d.document_type_name}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex justify-end gap-2">
+                      <button type="button" onClick={() => { setSel(d); setShowOpen(true); }} className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                        <Eye className="h-3.5 w-3.5" />
+                        Ver
+                      </button>
+                      <button type="button" onClick={() => openEdit(d)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                        <Pencil className="h-3.5 w-3.5" />
+                        Editar
+                      </button>
+                      <button type="button" onClick={() => removeDocument(d)} className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white">
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Eliminar
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               )) : <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No se encontraron documentos.</td></tr>}
             </tbody>
@@ -462,7 +519,7 @@ export default function DocumentsModule() {
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
-        <p className="text-muted-foreground">Mostrando {rows.length} de {filtered.length} documentos</p>
+        <p className="text-muted-foreground">Mostrando {rows.length} de {pagination.total} documentos</p>
         <div className="flex items-center gap-2">
           <button type="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">Anterior</button>
           <span className="text-xs text-muted-foreground">Pagina {page} de {totalPages}</span>
@@ -474,7 +531,7 @@ export default function DocumentsModule() {
         <form onSubmit={submitCreate} className="space-y-4">
           {createErr ? <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">{createErr}</div> : null}
           <div className="grid gap-3 md:grid-cols-2">
-            <select value={createForm.document_type_id} onChange={(e) => setCreateForm((p) => ({ ...p, document_type_id: e.target.value, campos: {} }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm" required><option value="">Tipo</option>{docTypes.filter((x) => x.name !== "Bloque").map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}</select>
+            <select value={createForm.document_type_id} onChange={(e) => setCreateForm((p) => ({ ...p, document_type_id: e.target.value, campos: {} }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm" required><option value="">Tipo</option>{selectableDocTypes.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}</select>
             <input value={createForm.n_documento} onChange={(e) => setCreateForm((p) => ({ ...p, n_documento: e.target.value.toUpperCase() }))} placeholder="N documento" className="h-10 rounded-lg border border-border bg-background px-3 text-sm" required />
             <input value={createForm.asunto} onChange={(e) => setCreateForm((p) => ({ ...p, asunto: e.target.value }))} placeholder="Asunto" className="h-10 rounded-lg border border-border bg-background px-3 text-sm md:col-span-2" required />
             <input value={createForm.folios} onChange={(e) => setCreateForm((p) => ({ ...p, folios: e.target.value }))} placeholder="Folios" className="h-10 rounded-lg border border-border bg-background px-3 text-sm" />
@@ -489,7 +546,7 @@ export default function DocumentsModule() {
         <form onSubmit={submitEdit} className="space-y-4">
           {editErr ? <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">{editErr}</div> : null}
           <div className="grid gap-3 md:grid-cols-2">
-            <select value={editForm.document_type_id} onChange={(e) => setEditForm((p) => ({ ...p, document_type_id: e.target.value, campos: {} }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm" required><option value="">Tipo</option>{docTypes.filter((x) => x.name !== "Bloque").map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}</select>
+            <select value={editForm.document_type_id} onChange={(e) => setEditForm((p) => ({ ...p, document_type_id: e.target.value, campos: {} }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm" required><option value="">Tipo</option>{selectableDocTypes.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}</select>
             <input value={editForm.n_documento} onChange={(e) => setEditForm((p) => ({ ...p, n_documento: e.target.value.toUpperCase() }))} placeholder="N documento" className="h-10 rounded-lg border border-border bg-background px-3 text-sm" required />
             <input value={editForm.asunto} onChange={(e) => setEditForm((p) => ({ ...p, asunto: e.target.value }))} placeholder="Asunto" className="h-10 rounded-lg border border-border bg-background px-3 text-sm md:col-span-2" required />
             <input value={editForm.folios} onChange={(e) => setEditForm((p) => ({ ...p, folios: e.target.value }))} placeholder="Folios" className="h-10 rounded-lg border border-border bg-background px-3 text-sm" />

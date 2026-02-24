@@ -1,16 +1,41 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
 import { config, withId } from "@/config/llapiy-config";
-import { apiDelete, apiGet, apiPost, apiPut, toList, unwrapData } from "@/lib/llapiy-api";
+import { apiDelete, apiGet, apiPost, apiPut, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
+import { KeyRound, Pencil, Plus, Shield, Trash2 } from "lucide-react";
 
 type PermissionItem = { key: string; label: string };
 type PermissionGroup = { module: string; moduleLabel: string; permissions: PermissionItem[] };
 type RoleRecord = { id: number; name: string; permissions: string[] };
 type RoleForm = { name: string; permissions: string[] };
+type TemplateModule = "inbox" | "storage" | "documents" | "blocks";
+type RoleTemplate = { id: string; label: string; description: string; modules: TemplateModule[] };
 
 const roleLabels: Record<string, string> = {
   ADMINISTRADOR: "Administrador",
   admin: "Administrador"
+};
+
+const roleTemplates: RoleTemplate[] = [
+  {
+    id: "archivo-central",
+    label: "Encargado del central de archivos",
+    description: 'Acceso completo a "Bandeja de entrada", "Almacenamiento", "Documentos" y "Bloques".',
+    modules: ["inbox", "storage", "documents", "blocks"]
+  },
+  {
+    id: "colaborador",
+    label: "Colaborador",
+    description: 'Acceso completo a "Documentos" y "Bloques".',
+    modules: ["documents", "blocks"]
+  }
+];
+
+const templateModuleAliases: Record<TemplateModule, string[]> = {
+  inbox: ["inbox", "bandeja", "bandeja de entrada"],
+  storage: ["storage", "almacenamiento", "sections", "section", "andamios", "boxes", "box", "archivos", "archivo"],
+  documents: ["documents", "documentos", "document"],
+  blocks: ["blocks", "bloques", "block"]
 };
 
 const defaultPermissionGroups: PermissionGroup[] = [
@@ -65,7 +90,7 @@ const defaultPermissionLabelMap = new Map<string, string>(
   defaultPermissionGroups.flatMap((group) => [[group.module, group.moduleLabel], ...group.permissions.map((permission) => [permission.key, permission.label])])
 );
 
-const defaultPermissionKeys = defaultPermissionGroups.flatMap((group) => [group.module, ...group.permissions.map((permission) => permission.key)]);
+const defaultPermissionKeys: string[] = [];
 const permissionActionLabels: Record<string, string> = {
   index: "Ver",
   view: "Ver",
@@ -85,6 +110,7 @@ const permissionActionLabels: Record<string, string> = {
 };
 
 const emptyForm: RoleForm = { name: "", permissions: [] };
+const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
@@ -131,7 +157,7 @@ function buildPermissionGroups(permissionKeys: string[]): PermissionGroup[] {
     const [module] = key.split(".");
     if (!module) return;
     if (!grouped.has(module)) grouped.set(module, new Set<string>());
-    if (key !== module) grouped.get(module)?.add(key);
+    grouped.get(module)?.add(key);
   });
 
   return [...grouped.entries()]
@@ -143,6 +169,36 @@ function buildPermissionGroups(permissionKeys: string[]): PermissionGroup[] {
         .map((permission) => ({ key: permission, label: getPermissionLabel(permission) }))
     }))
     .sort((a, b) => a.moduleLabel.localeCompare(b.moduleLabel));
+}
+
+function normalizeModuleName(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function matchTemplateModule(group: PermissionGroup, templateModule: TemplateModule) {
+  const normalizedCandidates = [group.module, group.moduleLabel].map(normalizeModuleName);
+  const aliases = templateModuleAliases[templateModule].map(normalizeModuleName);
+
+  return normalizedCandidates.some((candidate) =>
+    aliases.some((alias) => candidate === alias || candidate.startsWith(`${alias} `) || candidate.endsWith(` ${alias}`) || candidate.includes(` ${alias} `))
+  );
+}
+
+function resolveTemplatePermissions(permissionGroups: PermissionGroup[], templateId: string) {
+  const template = roleTemplates.find((item) => item.id === templateId);
+  if (!template) return [];
+
+  return uniqueStrings(
+    permissionGroups
+      .filter((group) => template.modules.some((templateModule) => matchTemplateModule(group, templateModule)))
+      .flatMap((group) => group.permissions.map((permission) => permission.key))
+  );
 }
 
 function Modal({
@@ -170,6 +226,58 @@ function Modal({
         </div>
         <div className="max-h-[calc(92vh-72px)] overflow-y-auto px-5 py-5">{children}</div>
       </div>
+    </div>
+  );
+}
+
+function RoleTemplateSelector({
+  permissionGroups,
+  onApply
+}: {
+  permissionGroups: PermissionGroup[];
+  onApply: (permissions: string[]) => void;
+}) {
+  const [templateId, setTemplateId] = useState("");
+  const selectedTemplate = useMemo(() => roleTemplates.find((template) => template.id === templateId) ?? null, [templateId]);
+  const resolvedPermissions = useMemo(() => resolveTemplatePermissions(permissionGroups, templateId), [permissionGroups, templateId]);
+  const handleTemplateChange = (nextTemplateId: string) => {
+    setTemplateId(nextTemplateId);
+    onApply(resolveTemplatePermissions(permissionGroups, nextTemplateId));
+  };
+
+  return (
+    <div className="space-y-2 rounded-xl border border-border bg-background p-4">
+      <p className="text-sm font-semibold text-foreground">Plantillas de permisos</p>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <select
+          value={templateId}
+          onChange={(event) => handleTemplateChange(event.target.value)}
+          className="h-10 flex-1 rounded-lg border border-border bg-card px-3 text-sm"
+        >
+          <option value="">Seleccionar plantilla</option>
+          {roleTemplates.map((template) => (
+            <option key={template.id} value={template.id}>
+              {template.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          disabled={!templateId}
+          onClick={() => onApply(resolvedPermissions)}
+          className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Aplicar plantilla
+        </button>
+      </div>
+      {selectedTemplate ? <p className="text-xs text-muted-foreground">{selectedTemplate.description}</p> : null}
+      {templateId ? (
+        <p className="text-xs text-muted-foreground">
+          {resolvedPermissions.length
+            ? `Se aplicaran ${resolvedPermissions.length} permisos disponibles para esta plantilla.`
+            : "No se encontraron permisos disponibles para esta plantilla en el catalogo actual."}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -212,7 +320,7 @@ function PermissionSelector({
   const toggleModule = (group: PermissionGroup, checked: boolean) => {
     setSelected((previous) => {
       const next = new Set(previous);
-      const keys = [group.module, ...group.permissions.map((permission) => permission.key)];
+      const keys = group.permissions.map((permission) => permission.key);
       keys.forEach((key) => {
         if (checked) next.add(key);
         else next.delete(key);
@@ -228,7 +336,7 @@ function PermissionSelector({
   const clearAll = () => setSelected([]);
 
   const selectedChips = selected
-    .map((key) => ({ key, label: permissionLabelMap.get(key) ?? key }))
+    .map((key) => ({ key, label: permissionLabelMap.get(key) ?? getPermissionLabel(key) }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
   return (
@@ -267,7 +375,7 @@ function PermissionSelector({
         {visibleGroups.map((group) => {
           const actionKeys = group.permissions.map((permission) => permission.key);
           const checkedCount = actionKeys.filter((key) => selectedSet.has(key)).length;
-          const moduleChecked = selectedSet.has(group.module) || (actionKeys.length > 0 && checkedCount === actionKeys.length);
+          const moduleChecked = actionKeys.length > 0 && checkedCount === actionKeys.length;
           const moduleIndeterminate = checkedCount > 0 && checkedCount < actionKeys.length;
           const isCollapsed = collapsed.has(group.module);
 
@@ -340,6 +448,9 @@ export default function RolesModule() {
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationMeta>(emptyPagination);
+  const [totalRolesCount, setTotalRolesCount] = useState(0);
+  const [totalPermissionsCount, setTotalPermissionsCount] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [selected, setSelected] = useState<RoleRecord | null>(null);
@@ -351,11 +462,11 @@ export default function RolesModule() {
   const permissionLabelMap = useMemo(
     () =>
       new Map<string, string>(
-        permissionGroups.flatMap((group) => [[group.module, group.moduleLabel], ...group.permissions.map((permission) => [permission.key, permission.label])])
+        permissionGroups.flatMap((group) => group.permissions.map((permission) => [permission.key, permission.label]))
       ),
     [permissionGroups]
   );
-  const allPermissionKeys = useMemo(() => permissionGroups.flatMap((group) => [group.module, ...group.permissions.map((permission) => permission.key)]), [permissionGroups]);
+  const allPermissionKeys = useMemo(() => permissionGroups.flatMap((group) => group.permissions.map((permission) => permission.key)), [permissionGroups]);
 
   const mergePermissionCatalog = (permissionKeys: string[]) => {
     if (!permissionKeys.length) return;
@@ -381,19 +492,36 @@ export default function RolesModule() {
     }
   };
 
-  const loadRoles = async (searchValue = "") => {
+  const loadRoles = async (searchValue = "", pageValue = currentPage) => {
     setIsLoading(true);
     try {
-      const response = await apiGet<{ roles?: unknown; permissions?: unknown; all_permissions?: unknown }>(config.endpoints.roles.list, {
-        search: searchValue || undefined
+      const response = await apiGet<{
+        roles?: unknown;
+        permissions?: unknown;
+        all_permissions?: unknown;
+        totalRoles?: number;
+        totalPermissions?: number;
+      }>(config.endpoints.roles.list, {
+        search: searchValue || undefined,
+        page: pageValue
       });
-      const data = unwrapData(response) as { roles?: unknown; permissions?: unknown; all_permissions?: unknown };
+      const data = unwrapData(response) as {
+        roles?: unknown;
+        permissions?: unknown;
+        all_permissions?: unknown;
+        totalRoles?: unknown;
+        totalPermissions?: unknown;
+      };
       const next = toList<any>(data?.roles).map((role) => ({
         id: Number(role?.id ?? 0),
         name: String(role?.name ?? ""),
         permissions: uniqueStrings(toList<unknown>(role?.permissions).map(getPermissionName))
       }));
       setRoles(next);
+      const nextPagination = getPaginationMeta(data?.roles);
+      setPagination(nextPagination);
+      setTotalRolesCount(Number(data?.totalRoles ?? nextPagination.total ?? 0));
+      setTotalPermissionsCount(Number(data?.totalPermissions ?? 0));
 
       mergePermissionCatalog([
         ...next.flatMap((role) => role.permissions),
@@ -410,20 +538,13 @@ export default function RolesModule() {
   }, []);
 
   useEffect(() => {
-    void loadRoles(appliedSearch).catch((error) => {
+    void loadRoles(appliedSearch, currentPage).catch((error) => {
       console.error("[RolesModule] Load error:", error);
     });
-  }, [appliedSearch]);
+  }, [appliedSearch, currentPage]);
 
-  const filteredRoles = useMemo(() => {
-    const query = appliedSearch.trim().toLowerCase();
-    if (!query) return roles;
-    return roles.filter((role) => role.name.toLowerCase().includes(query));
-  }, [roles, appliedSearch]);
-
-  const pageSize = 8;
-  const totalPages = Math.max(1, Math.ceil(filteredRoles.length / pageSize));
-  const paginatedRoles = filteredRoles.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const totalPages = Math.max(1, pagination.lastPage);
+  const paginatedRoles = roles;
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -447,7 +568,7 @@ export default function RolesModule() {
           name: createForm.name.trim().toUpperCase(),
           permissions: [...new Set(createForm.permissions)]
         });
-        await loadRoles(appliedSearch);
+        await loadRoles(appliedSearch, currentPage);
         setCreateError("");
         setCreateForm(emptyForm);
         setCreateOpen(false);
@@ -476,7 +597,7 @@ export default function RolesModule() {
           name: editForm.name.trim().toUpperCase(),
           permissions: [...new Set(editForm.permissions)]
         });
-        await loadRoles(appliedSearch);
+        await loadRoles(appliedSearch, currentPage);
         setEditError("");
         setSelected(null);
         setEditOpen(false);
@@ -498,7 +619,7 @@ export default function RolesModule() {
     void (async () => {
       try {
         await apiDelete(withId(config.endpoints.roles.delete, role.id));
-        await loadRoles(appliedSearch);
+        await loadRoles(appliedSearch, currentPage);
       } catch (error) {
         console.error("[RolesModule] Delete error:", error);
         window.alert("No se pudo eliminar el rol.");
@@ -515,7 +636,8 @@ export default function RolesModule() {
             <h2 className="mt-2 text-2xl font-semibold">Roles y permisos</h2>
             <p className="mt-1 text-sm text-white/75">Gestiona permisos por rol para controlar cada modulo.</p>
           </div>
-          <button type="button" onClick={() => { setCreateError(""); setCreateForm(emptyForm); setCreateOpen(true); }} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">
+          <button type="button" onClick={() => { setCreateError(""); setCreateForm(emptyForm); setCreateOpen(true); }} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">
+            <Plus className="h-4 w-4" />
             Crear rol
           </button>
         </div>
@@ -523,12 +645,26 @@ export default function RolesModule() {
 
       <div className="grid gap-3 sm:grid-cols-2">
         <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Total de roles</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : roles.length}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Shield className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total de roles</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : totalRolesCount}</p>
+            </div>
+          </div>
         </article>
         <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Permisos disponibles</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : allPermissionKeys.length}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <KeyRound className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Permisos disponibles</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : totalPermissionsCount}</p>
+            </div>
+          </div>
         </article>
       </div>
 
@@ -576,8 +712,8 @@ export default function RolesModule() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => openEdit(role)} className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">Editar</button>
-                        <button type="button" onClick={() => deleteRole(role)} className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white">Eliminar</button>
+                        <button type="button" onClick={() => openEdit(role)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white"><Pencil className="h-3.5 w-3.5" />Editar</button>
+                        <button type="button" onClick={() => deleteRole(role)} className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white"><Trash2 className="h-3.5 w-3.5" />Eliminar</button>
                       </div>
                     </td>
                   </tr>
@@ -595,7 +731,7 @@ export default function RolesModule() {
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
-        <p className="text-muted-foreground">Mostrando {paginatedRoles.length} de {filteredRoles.length} roles</p>
+        <p className="text-muted-foreground">Mostrando {paginatedRoles.length} de {pagination.total} roles</p>
         <div className="flex items-center gap-2">
           <button type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
             Anterior
@@ -614,6 +750,13 @@ export default function RolesModule() {
             <label className="text-sm font-semibold text-foreground">Nombre del rol</label>
             <input value={createForm.name} onChange={(event) => setCreateForm((previous) => ({ ...previous, name: event.target.value }))} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm" />
           </div>
+          <RoleTemplateSelector
+            permissionGroups={permissionGroups}
+            onApply={(permissions) => {
+              setCreateError("");
+              setCreateForm((previous) => ({ ...previous, permissions }));
+            }}
+          />
           <PermissionSelector
             selected={createForm.permissions}
             setSelected={(value) => setCreateForm((previous) => ({ ...previous, permissions: typeof value === "function" ? value(previous.permissions) : value }))}
@@ -632,6 +775,13 @@ export default function RolesModule() {
             <label className="text-sm font-semibold text-foreground">Nombre del rol</label>
             <input value={editForm.name} onChange={(event) => setEditForm((previous) => ({ ...previous, name: event.target.value }))} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm" />
           </div>
+          <RoleTemplateSelector
+            permissionGroups={permissionGroups}
+            onApply={(permissions) => {
+              setEditError("");
+              setEditForm((previous) => ({ ...previous, permissions }));
+            }}
+          />
           <PermissionSelector
             selected={editForm.permissions}
             setSelected={(value) => setEditForm((previous) => ({ ...previous, permissions: typeof value === "function" ? value(previous.permissions) : value }))}

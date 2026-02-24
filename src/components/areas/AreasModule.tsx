@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from "react";
 import { useEffect } from "react";
 import { config } from "@/config/llapiy-config";
 import { apiGet, toList, unwrapData } from "@/lib/llapiy-api";
+import { Building2, Eye, Pencil, Plus, Trash2 } from "lucide-react";
 
 type AreaRecord = {
   id: number;
@@ -117,7 +118,8 @@ function SubgroupTreeView({
           <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-2 py-1.5 text-xs">
             <span className="font-semibold text-foreground">{item.descripcion}</span>
             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{item.abreviacion}</span>
-            <button type="button" onClick={() => onDelete(item.id)} className="ml-auto rounded bg-red-600 px-2 py-1 text-[10px] font-semibold text-white">
+            <button type="button" onClick={() => onDelete(item.id)} className="ml-auto inline-flex items-center gap-1 rounded bg-red-600 px-2 py-1 text-[10px] font-semibold text-white">
+              <Trash2 className="h-3 w-3" />
               Eliminar
             </button>
           </div>
@@ -395,8 +397,15 @@ export default function AreasModule() {
 
       <div className="grid gap-3 sm:grid-cols-2">
         <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Areas registradas</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : visibleAreas.length}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Building2 className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Areas registradas</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : visibleAreas.length}</p>
+            </div>
+          </div>
         </article>
       </div>
 
@@ -408,8 +417,9 @@ export default function AreasModule() {
             setAreaForm(emptyAreaForm);
             setCreateOpen(true);
           }}
-          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white"
+          className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white"
         >
+          <Plus className="h-4 w-4" />
           Crear nueva area
         </button>
       </div>
@@ -429,10 +439,12 @@ export default function AreasModule() {
                 {area.descripcion} ({area.abreviacion || "-"})
               </h3>
               <div className="mt-4 flex flex-wrap gap-2">
-                <button type="button" onClick={() => openAreaDetails(area)} className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                <button type="button" onClick={() => openAreaDetails(area)} className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                  <Eye className="h-3.5 w-3.5" />
                   Ver grupos y subgrupos
                 </button>
-                <button type="button" onClick={() => openEditArea(area)} className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                <button type="button" onClick={() => openEditArea(area)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                  <Pencil className="h-3.5 w-3.5" />
                   Editar area
                 </button>
                 <button
@@ -440,8 +452,9 @@ export default function AreasModule() {
                   onClick={() => deleteArea(area.id)}
                   disabled={totalGroupsForArea(area.id) > 0}
                   title={totalGroupsForArea(area.id) > 0 ? "No se puede eliminar porque tiene grupos asociados" : ""}
-                  className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
+                  <Trash2 className="h-3.5 w-3.5" />
                   Eliminar area
                 </button>
               </div>
@@ -559,7 +572,8 @@ export default function AreasModule() {
                           </div>
 
                           <div className="mt-3 flex flex-wrap justify-end gap-2">
-                            <button type="button" onClick={() => updateGroupInline(group)} className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                            <button type="button" onClick={() => updateGroupInline(group)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                              <Pencil className="h-3.5 w-3.5" />
                               Editar grupo
                             </button>
                             <button
@@ -567,8 +581,9 @@ export default function AreasModule() {
                               onClick={() => deleteGroup(group.id)}
                               disabled={(subgroupsByGroup.get(group.id)?.length ?? 0) > 0}
                               title={(subgroupsByGroup.get(group.id)?.length ?? 0) > 0 ? "No se puede eliminar porque tiene subgrupos asociados" : ""}
-                              className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                             >
+                              <Trash2 className="h-3.5 w-3.5" />
                               Eliminar grupo
                             </button>
                           </div>

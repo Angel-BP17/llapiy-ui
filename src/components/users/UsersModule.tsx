@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";
 import { config, withId } from "@/config/llapiy-config";
-import { apiDelete, apiGet, apiPost, apiPut, downloadWebReport, toList, unwrapData } from "@/lib/llapiy-api";
+import { apiDelete, apiGet, apiPost, apiPut, downloadWebReport, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
+import { Building2, Eye, FileDown, Pencil, Shield, Trash2, UserPlus, Users } from "lucide-react";
 
 type SimpleOption = {
   id: number;
@@ -90,6 +91,7 @@ const emptyForm: UserForm = {
   subgroupId: "",
   foto: defaultAvatar,
 };
+const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 function Modal({
   open,
@@ -182,7 +184,18 @@ function validateForm(form: UserForm): string | null {
 
 async function downloadUsersReport(search: string) {
   try {
-    await downloadWebReport(config.endpoints.users.pdf, search ? { name: search } : undefined, "reporte_usuarios.pdf");
+    const term = search.trim();
+    await downloadWebReport(
+      config.endpoints.users.pdf,
+      term
+        ? {
+            search: term,
+            // Compatibilidad con el servicio actual de PDF (name) y con la vista Blade (search).
+            name: term
+          }
+        : undefined,
+      "reporte_usuarios.pdf"
+    );
   } catch (error) {
     console.error("[UsersModule] Report error:", error);
     window.alert("No se pudo generar el reporte de usuarios.");
@@ -406,6 +419,10 @@ export default function UsersModule() {
   const [searchValue, setSearchValue] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationMeta>(emptyPagination);
+  const [totalUsers, setTotalUsers] = useState(0);
+  const [totalRolesCount, setTotalRolesCount] = useState(0);
+  const [totalAreasCount, setTotalAreasCount] = useState(0);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -417,17 +434,28 @@ export default function UsersModule() {
   const [createError, setCreateError] = useState("");
   const [editError, setEditError] = useState("");
 
-  const loadUsers = async (search = "") => {
+  const loadUsers = async (search = "", page = currentPage) => {
     setIsLoading(true);
     try {
       const response = await apiGet<{
         users: { data: any[] } | any[];
         areas: any[];
         roles: any[];
+        totalUsers?: number;
+        totalRoles?: number;
+        totalAreas?: number;
       }>(config.endpoints.users.list, {
-        search: search || undefined
+        search: search || undefined,
+        page
       });
-      const data = unwrapData(response) as { users?: unknown; areas?: unknown; roles?: unknown };
+      const data = unwrapData(response) as {
+        users?: unknown;
+        areas?: unknown;
+        roles?: unknown;
+        totalUsers?: unknown;
+        totalRoles?: unknown;
+        totalAreas?: unknown;
+      };
 
       const nextAreas = toList<any>(data?.areas).map((area) => ({
         id: Number(area?.id ?? 0),
@@ -474,47 +502,26 @@ export default function UsersModule() {
       areasCatalog.splice(0, areasCatalog.length, ...nextAreas);
       roleCatalog.splice(0, roleCatalog.length, ...nextRoles);
       setUsers(nextUsers);
+      setPagination(getPaginationMeta(data?.users));
+      setTotalUsers(Number(data?.totalUsers ?? 0));
+      setTotalRolesCount(Number(data?.totalRoles ?? nextRoles.length));
+      setTotalAreasCount(Number(data?.totalAreas ?? nextAreas.length));
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    void loadUsers(appliedSearch).catch((error) => {
+    void loadUsers(appliedSearch, currentPage).catch((error) => {
       console.error("[UsersModule] Load error:", error);
     });
-  }, [appliedSearch]);
+  }, [appliedSearch, currentPage]);
 
-  const pageSize = 8;
-
-  const totalRoles = roleCatalog.length;
-  const totalAreas = areasCatalog.length;
-
-  const filteredUsers = useMemo(() => {
-    const query = appliedSearch.trim().toLowerCase();
-    if (!query) return users;
-
-    return users.filter((user) => {
-      const fullName = `${user.name} ${user.last_name}`.toLowerCase();
-      return (
-        fullName.includes(query) ||
-        user.user_name.toLowerCase().includes(query) ||
-        user.email.toLowerCase().includes(query)
-      );
-    });
-  }, [users, appliedSearch]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
-
-  const paginatedUsers = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredUsers.slice(start, start + pageSize);
-  }, [filteredUsers, currentPage]);
+  const totalPages = Math.max(1, pagination.lastPage);
+  const paginatedUsers = users;
 
   useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
+    if (currentPage > totalPages) setCurrentPage(totalPages);
   }, [currentPage, totalPages]);
 
   const createGroupTypes = useMemo(() => {
@@ -664,7 +671,7 @@ export default function UsersModule() {
           subgroup_id: createForm.subgroupId ? Number(createForm.subgroupId) : undefined,
           roles: createForm.roles
         });
-        await loadUsers(appliedSearch);
+        await loadUsers(appliedSearch, currentPage);
         setCreateForm(emptyForm);
         setCreateError("");
         setIsCreateOpen(false);
@@ -704,7 +711,7 @@ export default function UsersModule() {
           subgroup: editForm.subgroupId ? Number(editForm.subgroupId) : undefined,
           roles: editForm.roles
         });
-        await loadUsers(appliedSearch);
+        await loadUsers(appliedSearch, currentPage);
         setIsEditOpen(false);
         setSelectedUser(null);
         setEditError("");
@@ -741,7 +748,7 @@ export default function UsersModule() {
     void (async () => {
       try {
         await apiDelete(withId(config.endpoints.users.delete, user.id));
-        await loadUsers(appliedSearch);
+        await loadUsers(appliedSearch, currentPage);
       } catch (error) {
         console.error("[UsersModule] Delete error:", error);
         window.alert("No se pudo eliminar el usuario.");
@@ -750,6 +757,26 @@ export default function UsersModule() {
   };
 
   const selectedLabels = selectedUser ? getLocationLabels(selectedUser) : null;
+  const userStats = [
+    {
+      label: "Total de usuarios",
+      value: totalUsers,
+      icon: Users,
+      toneClass: "bg-violet-100 text-violet-600"
+    },
+    {
+      label: "Roles disponibles",
+      value: totalRolesCount,
+      icon: Shield,
+      toneClass: "bg-emerald-100 text-emerald-600"
+    },
+    {
+      label: "Areas registradas",
+      value: totalAreasCount,
+      icon: Building2,
+      toneClass: "bg-amber-100 text-amber-600"
+    }
+  ];
 
   return (
     <section className="space-y-5">
@@ -770,43 +797,35 @@ export default function UsersModule() {
             {isLoading ? (
               <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" />
             ) : (
-              `${users.length} registros`
+              `${pagination.total} registros`
             )}
           </span>
         </div>
       </header>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Total de usuarios</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">
-            {isLoading ? (
-              <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" />
-            ) : (
-              users.length
-            )}
-          </p>
-        </article>
-        <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Roles disponibles</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">
-            {isLoading ? (
-              <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" />
-            ) : (
-              totalRoles
-            )}
-          </p>
-        </article>
-        <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Areas registradas</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">
-            {isLoading ? (
-              <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" />
-            ) : (
-              totalAreas
-            )}
-          </p>
-        </article>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {userStats.map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <article key={stat.label} className="group rounded-xl border border-border bg-card p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+              <div className="flex items-center gap-3">
+                <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${stat.toneClass}`}>
+                  <Icon className="h-5 w-5" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-muted-foreground">{stat.label}</p>
+                  <div className="mt-1 h-8">
+                    {isLoading ? (
+                      <div className="h-8 w-16 animate-pulse rounded-md bg-muted" />
+                    ) : (
+                      <p className="text-2xl font-semibold leading-8 text-foreground">{stat.value}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </article>
+          );
+        })}
       </div>
 
       <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
@@ -859,15 +878,18 @@ export default function UsersModule() {
                 setCreateError("");
                 setIsCreateOpen(true);
               }}
-              className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white"
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white"
             >
+              <UserPlus className="h-4 w-4" />
               Crear usuario
             </button>
             <button
               type="button"
               onClick={() => void downloadUsersReport(appliedSearch)}
-              className="h-10 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white"
+              disabled={!pagination.total}
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
+              <FileDown className="h-4 w-4" />
               Generar reporte
             </button>
           </div>
@@ -917,22 +939,25 @@ export default function UsersModule() {
                         <button
                           type="button"
                           onClick={() => openShowModal(user)}
-                          className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white"
+                          className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white"
                         >
+                          <Eye className="h-3.5 w-3.5" />
                           Ver
                         </button>
                         <button
                           type="button"
                           onClick={() => openEditModal(user)}
-                          className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white"
+                          className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white"
                         >
+                          <Pencil className="h-3.5 w-3.5" />
                           Editar
                         </button>
                         <button
                           type="button"
                           onClick={() => handleDelete(user)}
-                          className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white"
+                          className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white"
                         >
+                          <Trash2 className="h-3.5 w-3.5" />
                           Eliminar
                         </button>
                       </div>
@@ -956,7 +981,7 @@ export default function UsersModule() {
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
         <p className="text-muted-foreground">
-          Mostrando {paginatedUsers.length} de {filteredUsers.length} usuarios
+          Mostrando {paginatedUsers.length} de {pagination.total} usuarios
         </p>
         <div className="flex items-center gap-2">
           <button

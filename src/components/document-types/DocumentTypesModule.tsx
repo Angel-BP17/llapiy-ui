@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
-import { config } from "@/config/llapiy-config";
-import { apiGet, toList, unwrapData } from "@/lib/llapiy-api";
+import { config, withId } from "@/config/llapiy-config";
+import { apiDelete, apiGet, apiPost, apiPut, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
+import { Eye, FileText, ListChecks, Pencil, Plus, Trash2 } from "lucide-react";
 
 type Subgroup = {
   id: number;
@@ -68,6 +69,8 @@ const emptyForm: DocumentTypeForm = {
   groupIds: [],
   subgroupIds: []
 };
+const emptyFilters: Filters = { name: "", areaId: "", groupId: "", subgroupId: "" };
+const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 function flattenSubgroups(subgroups: Subgroup[]): Subgroup[] {
   const all: Subgroup[] = [];
@@ -394,11 +397,36 @@ function validateDocumentTypeForm(form: DocumentTypeForm): string | null {
   return null;
 }
 
+function toUniqueIds(values: number[]) {
+  return [...new Set(values.filter((value) => Number.isFinite(value) && value > 0))];
+}
+
+function toDocumentTypePayload(form: DocumentTypeForm) {
+  return {
+    name: form.name.trim(),
+    campos: JSON.stringify(toUniqueIds(form.campoTypeIds)),
+    groups: JSON.stringify(toUniqueIds(form.groupIds)),
+    subgroups: JSON.stringify(toUniqueIds(form.subgroupIds))
+  };
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const value = (error as { message?: unknown }).message;
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return fallback;
+}
+
 export default function DocumentTypesModule() {
   const [documentTypes, setDocumentTypes] = useState<DocumentTypeRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [filters, setFilters] = useState<Filters>({ name: "", areaId: "", groupId: "", subgroupId: "" });
+  const [filters, setFilters] = useState<Filters>(emptyFilters);
+  const [appliedFilters, setAppliedFilters] = useState<Filters>(emptyFilters);
   const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationMeta>(emptyPagination);
+  const [totalDocumentTypesCount, setTotalDocumentTypesCount] = useState(0);
+  const [totalCamposCount, setTotalCamposCount] = useState(0);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -412,75 +440,82 @@ export default function DocumentTypesModule() {
   const [createError, setCreateError] = useState("");
   const [editError, setEditError] = useState("");
 
-  useEffect(() => {
-    let ignore = false;
+  const loadDocumentTypes = async (filtersValue = appliedFilters, pageValue = currentPage) => {
+    setIsLoading(true);
+    try {
+      const response = await apiGet<{
+        documentTypes: { data: any[] } | any[];
+        areas: any[];
+        campoTypes: any[];
+        totalDocumentTypes?: number;
+        totalCampos?: number;
+      }>(config.endpoints.documentTypes.list, {
+        name: filtersValue.name || undefined,
+        area_id: filtersValue.areaId || undefined,
+        group_id: filtersValue.groupId || undefined,
+        subgroup_id: filtersValue.subgroupId || undefined,
+        page: pageValue
+      });
+      const data = unwrapData(response) as {
+        documentTypes?: unknown;
+        areas?: unknown;
+        campoTypes?: unknown;
+        totalDocumentTypes?: unknown;
+        totalCampos?: unknown;
+      };
 
-    const load = async () => {
-      setIsLoading(true);
-      try {
-        const response = await apiGet<{
-          documentTypes: { data: any[] } | any[];
-          areas: any[];
-          campoTypes: any[];
-        }>(config.endpoints.documentTypes.list);
-        const data = unwrapData(response) as {
-          documentTypes?: unknown;
-          areas?: unknown;
-          campoTypes?: unknown;
-        };
+      const nextRecords = toList<any>(data?.documentTypes).map((item) => ({
+        id: Number(item?.id ?? 0),
+        name: String(item?.name ?? ""),
+        campoTypeIds: toList<any>(item?.campo_types ?? item?.campoTypes).map((campo) => Number(campo?.id ?? 0)).filter(Boolean),
+        groupIds: toList<any>(item?.groups).map((group) => Number(group?.id ?? 0)).filter(Boolean),
+        subgroupIds: toList<any>(item?.subgroups).map((subgroup) => Number(subgroup?.id ?? 0)).filter(Boolean),
+        documentsCount: Number(item?.documents_count ?? 0)
+      }));
 
-        const nextRecords = toList<any>(data?.documentTypes).map((item) => ({
-          id: Number(item?.id ?? 0),
-          name: String(item?.name ?? ""),
-          campoTypeIds: toList<any>(item?.campo_types ?? item?.campoTypes).map((campo) => Number(campo?.id ?? 0)).filter(Boolean),
-          groupIds: toList<any>(item?.groups).map((group) => Number(group?.id ?? 0)).filter(Boolean),
-          subgroupIds: toList<any>(item?.subgroups).map((subgroup) => Number(subgroup?.id ?? 0)).filter(Boolean),
-          documentsCount: Number(item?.documents_count ?? 0)
-        }));
-
-        const nextAreas = toList<any>(data?.areas).map((area) => ({
-          id: Number(area?.id ?? 0),
-          descripcion: String(area?.descripcion ?? ""),
-          area_group_types: toList<any>(area?.area_group_types).map((areaGroupType) => ({
-            id: Number(areaGroupType?.id ?? 0),
-            group_type: {
-              id: Number(areaGroupType?.group_type?.id ?? 0),
-              descripcion: String(areaGroupType?.group_type?.descripcion ?? "")
-            },
-            groups: toList<any>(areaGroupType?.groups).map((group) => ({
-              id: Number(group?.id ?? 0),
-              descripcion: String(group?.descripcion ?? ""),
-              subgroups: toList<any>(group?.subgroups).map((subgroup) => ({
-                id: Number(subgroup?.id ?? 0),
-                descripcion: String(subgroup?.descripcion ?? "")
-              }))
+      const nextAreas = toList<any>(data?.areas).map((area) => ({
+        id: Number(area?.id ?? 0),
+        descripcion: String(area?.descripcion ?? ""),
+        area_group_types: toList<any>(area?.area_group_types).map((areaGroupType) => ({
+          id: Number(areaGroupType?.id ?? 0),
+          group_type: {
+            id: Number(areaGroupType?.group_type?.id ?? 0),
+            descripcion: String(areaGroupType?.group_type?.descripcion ?? "")
+          },
+          groups: toList<any>(areaGroupType?.groups).map((group) => ({
+            id: Number(group?.id ?? 0),
+            descripcion: String(group?.descripcion ?? ""),
+            subgroups: toList<any>(group?.subgroups).map((subgroup) => ({
+              id: Number(subgroup?.id ?? 0),
+              descripcion: String(subgroup?.descripcion ?? "")
             }))
           }))
-        }));
+        }))
+      }));
 
-        const nextCampos = toList<any>(data?.campoTypes).map((campo) => ({
-          id: Number(campo?.id ?? 0),
-          name: String(campo?.name ?? ""),
-          data_type: String(campo?.data_type ?? "string")
-        }));
+      const nextCampos = toList<any>(data?.campoTypes).map((campo) => ({
+        id: Number(campo?.id ?? 0),
+        name: String(campo?.name ?? ""),
+        data_type: String(campo?.data_type ?? "string")
+      }));
 
-        if (!ignore) {
-          setDocumentTypes(nextRecords);
-          areasCatalog.splice(0, areasCatalog.length, ...nextAreas);
-          campoTypesCatalog.splice(0, campoTypesCatalog.length, ...nextCampos);
-        }
-      } catch (error) {
-        console.error("[DocumentTypesModule] Load error:", error);
-      } finally {
-        if (!ignore) setIsLoading(false);
-      }
-    };
+      setDocumentTypes(nextRecords);
+      areasCatalog.splice(0, areasCatalog.length, ...nextAreas);
+      campoTypesCatalog.splice(0, campoTypesCatalog.length, ...nextCampos);
+      const nextPagination = getPaginationMeta(data?.documentTypes);
+      setPagination(nextPagination);
+      setTotalDocumentTypesCount(Number(data?.totalDocumentTypes ?? nextPagination.total ?? 0));
+      setTotalCamposCount(Number(data?.totalCampos ?? nextCampos.length));
+    } catch (error) {
+      console.error("[DocumentTypesModule] Load error:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-    void load();
-    return () => {
-      ignore = true;
-    };
-  }, []);
+  useEffect(() => {
+    void loadDocumentTypes(appliedFilters, currentPage);
+  }, [appliedFilters, currentPage]);
 
   const groups = useMemo(() => areasCatalog.flatMap((area) => getAreaGroups(area)), [documentTypes]);
   const subgroups = useMemo(() => groups.flatMap((group) => flattenSubgroups(group.subgroups)), [groups]);
@@ -488,26 +523,8 @@ export default function DocumentTypesModule() {
   const subgroupMap = useMemo(() => new Map(subgroups.map((subgroup) => [subgroup.id, subgroup.descripcion])), [subgroups]);
   const campoMap = useMemo(() => new Map(campoTypesCatalog.map((campo) => [campo.id, campo.name])), [documentTypes]);
 
-  const groupsByAreaMap = useMemo(() => {
-    const map = new Map<number, number[]>();
-    areasCatalog.forEach((area) => map.set(area.id, getAreaGroups(area).map((group) => group.id)));
-    return map;
-  }, [documentTypes]);
-
-  const filteredRecords = useMemo(() => {
-    const query = filters.name.trim().toLowerCase();
-    return documentTypes.filter((record) => {
-      const byName = !query || record.name.toLowerCase().includes(query);
-      const byArea = !filters.areaId || record.groupIds.some((groupId) => groupsByAreaMap.get(Number(filters.areaId))?.includes(groupId));
-      const byGroup = !filters.groupId || record.groupIds.includes(Number(filters.groupId));
-      const bySubgroup = !filters.subgroupId || record.subgroupIds.includes(Number(filters.subgroupId));
-      return byName && byArea && byGroup && bySubgroup;
-    });
-  }, [documentTypes, filters, groupsByAreaMap]);
-
-  const pageSize = 8;
-  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
-  const paginatedRecords = filteredRecords.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const totalPages = Math.max(1, pagination.lastPage);
+  const paginatedRecords = documentTypes;
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -528,20 +545,17 @@ export default function DocumentTypesModule() {
       return;
     }
 
-    setDocumentTypes((previous) => [
-      {
-        id: previous.length ? Math.max(...previous.map((item) => item.id)) + 1 : 1,
-        name: createForm.name.trim(),
-        campoTypeIds: [...new Set(createForm.campoTypeIds)],
-        groupIds: [...new Set(createForm.groupIds)],
-        subgroupIds: [...new Set(createForm.subgroupIds)],
-        documentsCount: 0
-      },
-      ...previous
-    ]);
-    setCreateOpen(false);
-    setCreateForm(emptyForm);
-    setCreateError("");
+    void (async () => {
+      try {
+        await apiPost(config.endpoints.documentTypes.create, toDocumentTypePayload(createForm));
+        await loadDocumentTypes(appliedFilters, currentPage);
+        setCreateOpen(false);
+        setCreateForm(emptyForm);
+        setCreateError("");
+      } catch (apiError: unknown) {
+        setCreateError(getErrorMessage(apiError, "No se pudo crear el tipo de documento."));
+      }
+    })();
   };
 
   const submitEdit = (event: FormEvent<HTMLFormElement>) => {
@@ -554,22 +568,17 @@ export default function DocumentTypesModule() {
       return;
     }
 
-    setDocumentTypes((previous) =>
-      previous.map((item) =>
-        item.id === selected.id
-          ? {
-              ...item,
-              name: editForm.name.trim(),
-              campoTypeIds: [...new Set(editForm.campoTypeIds)],
-              groupIds: [...new Set(editForm.groupIds)],
-              subgroupIds: [...new Set(editForm.subgroupIds)]
-            }
-          : item
-      )
-    );
-    setEditOpen(false);
-    setSelected(null);
-    setEditError("");
+    void (async () => {
+      try {
+        await apiPut(withId(config.endpoints.documentTypes.update, selected.id), toDocumentTypePayload(editForm));
+        await loadDocumentTypes(appliedFilters, currentPage);
+        setEditOpen(false);
+        setSelected(null);
+        setEditError("");
+      } catch (apiError: unknown) {
+        setEditError(getErrorMessage(apiError, "No se pudo actualizar el tipo de documento."));
+      }
+    })();
   };
 
   const openEdit = (record: DocumentTypeRecord) => {
@@ -587,7 +596,14 @@ export default function DocumentTypesModule() {
   const deleteRecord = (record: DocumentTypeRecord) => {
     if (record.documentsCount > 0) return;
     if (!window.confirm(`Eliminar el tipo de documento ${record.name}?`)) return;
-    setDocumentTypes((previous) => previous.filter((item) => item.id !== record.id));
+    void (async () => {
+      try {
+        await apiDelete(withId(config.endpoints.documentTypes.delete, record.id));
+        await loadDocumentTypes(appliedFilters, currentPage);
+      } catch (apiError: unknown) {
+        window.alert(getErrorMessage(apiError, "No se pudo eliminar el tipo de documento."));
+      }
+    })();
   };
 
   return (
@@ -599,18 +615,32 @@ export default function DocumentTypesModule() {
             <h2 className="mt-2 text-2xl font-semibold">Tipos de documentos</h2>
             <p className="mt-1 text-sm text-white/75">Estructura campos y clasificacion por area, grupo y subgrupo.</p>
           </div>
-          <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold">{isLoading ? <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" /> : `${filteredRecords.length} registros`}</span>
+          <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold">{isLoading ? <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" /> : `${pagination.total} registros`}</span>
         </div>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Tipos de documentos</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : documentTypes.length}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <FileText className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Tipos de documentos</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : totalDocumentTypesCount}</p>
+            </div>
+          </div>
         </article>
         <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Campos disponibles</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : campoTypesCatalog.length}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <ListChecks className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Campos disponibles</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : totalCamposCount}</p>
+            </div>
+          </div>
         </article>
       </div>
 
@@ -646,17 +676,32 @@ export default function DocumentTypesModule() {
           <button
             type="button"
             onClick={() => {
+              setCurrentPage(1);
+              setAppliedFilters({ ...filters });
+            }}
+            className="h-10 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground"
+          >
+            Aplicar filtros
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               setCreateError("");
               setCreateForm(emptyForm);
               setCreateOpen(true);
             }}
-            className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white"
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white"
           >
+            <Plus className="h-4 w-4" />
             Crear tipo de documento
           </button>
           <button
             type="button"
-            onClick={() => setFilters({ name: "", areaId: "", groupId: "", subgroupId: "" })}
+            onClick={() => {
+              setFilters(emptyFilters);
+              setAppliedFilters(emptyFilters);
+              setCurrentPage(1);
+            }}
             className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground"
           >
             Limpiar
@@ -689,26 +734,30 @@ export default function DocumentTypesModule() {
               ) : paginatedRecords.length ? (
                 paginatedRecords.map((record, index) => (
                   <tr key={record.id} className="border-t border-border">
-                    <td className="px-4 py-3">{(currentPage - 1) * pageSize + index + 1}</td>
+                    <td className="px-4 py-3">{(pagination.from || 1) + index}</td>
                     <td className="px-4 py-3 font-semibold text-foreground">{record.name}</td>
                     <td className="px-4 py-3">
-                      <button type="button" onClick={() => openListModal(`Campos de ${record.name}`, record.campoTypeIds, campoMap, "Sin campos")} className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                      <button type="button" onClick={() => openListModal(`Campos de ${record.name}`, record.campoTypeIds, campoMap, "Sin campos")} className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                        <Eye className="h-3.5 w-3.5" />
                         Ver
                       </button>
                     </td>
                     <td className="px-4 py-3">
-                      <button type="button" onClick={() => openListModal(`Grupos de ${record.name}`, record.groupIds, groupMap, "Sin grupos")} className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                      <button type="button" onClick={() => openListModal(`Grupos de ${record.name}`, record.groupIds, groupMap, "Sin grupos")} className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                        <Eye className="h-3.5 w-3.5" />
                         Ver
                       </button>
                     </td>
                     <td className="px-4 py-3">
-                      <button type="button" onClick={() => openListModal(`Subgrupos de ${record.name}`, record.subgroupIds, subgroupMap, "Sin subgrupos")} className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                      <button type="button" onClick={() => openListModal(`Subgrupos de ${record.name}`, record.subgroupIds, subgroupMap, "Sin subgrupos")} className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                        <Eye className="h-3.5 w-3.5" />
                         Ver
                       </button>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => openEdit(record)} className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                        <button type="button" onClick={() => openEdit(record)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                          <Pencil className="h-3.5 w-3.5" />
                           Editar
                         </button>
                         <button
@@ -716,8 +765,9 @@ export default function DocumentTypesModule() {
                           onClick={() => deleteRecord(record)}
                           disabled={record.documentsCount > 0}
                           title={record.documentsCount > 0 ? "No se puede eliminar porque tiene documentos asociados" : ""}
-                          className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                         >
+                          <Trash2 className="h-3.5 w-3.5" />
                           Eliminar
                         </button>
                       </div>
@@ -738,7 +788,7 @@ export default function DocumentTypesModule() {
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
         <p className="text-muted-foreground">
-          Mostrando {paginatedRecords.length} de {filteredRecords.length} tipos de documentos
+          Mostrando {paginatedRecords.length} de {pagination.total} tipos de documentos
         </p>
         <div className="flex items-center gap-2">
           <button type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">

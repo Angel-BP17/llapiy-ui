@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { config, withId } from "@/config/llapiy-config";
-import { apiDelete, apiGet, apiPost, apiPut, toList, unwrapData } from "@/lib/llapiy-api";
+import { apiDelete, apiGet, apiPost, apiPut, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
+import { Layers, Pencil, Plus, Trash2 } from "lucide-react";
 
 type GroupTypeRecord = {
   id: number;
@@ -16,6 +17,7 @@ type GroupTypeForm = {
 };
 
 const emptyForm: GroupTypeForm = { descripcion: "", abreviacion: "" };
+const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 function Modal({
   open,
@@ -50,6 +52,7 @@ export default function GroupTypesModule() {
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationMeta>(emptyPagination);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -59,11 +62,12 @@ export default function GroupTypesModule() {
   const [createError, setCreateError] = useState("");
   const [editError, setEditError] = useState("");
 
-  const loadGroupTypes = async (searchValue = "") => {
+  const loadGroupTypes = async (searchValue = "", pageValue = currentPage) => {
     setIsLoading(true);
     try {
       const response = await apiGet<{ groupTypes: { data: any[] } | any[] }>(config.endpoints.groupTypes.list, {
-        search: searchValue || undefined
+        search: searchValue || undefined,
+        page: pageValue
       });
       const data = unwrapData(response) as { groupTypes?: unknown };
       const next = toList<any>(data?.groupTypes).map((item) => ({
@@ -73,28 +77,20 @@ export default function GroupTypesModule() {
         groups_count: toList<any>(item?.area_group_types).reduce((total, areaGroupType) => total + toList<any>(areaGroupType?.groups).length, 0)
       }));
       setGroupTypes(next);
+      setPagination(getPaginationMeta(data?.groupTypes));
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    void loadGroupTypes(appliedSearch).catch((error) => {
+    void loadGroupTypes(appliedSearch, currentPage).catch((error) => {
       console.error("[GroupTypesModule] Load error:", error);
     });
-  }, [appliedSearch]);
+  }, [appliedSearch, currentPage]);
 
-  const filteredTypes = useMemo(() => {
-    const query = appliedSearch.trim().toLowerCase();
-    if (!query) return groupTypes;
-    return groupTypes.filter((item) =>
-      `${item.descripcion} ${item.abreviacion}`.toLowerCase().includes(query)
-    );
-  }, [groupTypes, appliedSearch]);
-
-  const pageSize = 8;
-  const totalPages = Math.max(1, Math.ceil(filteredTypes.length / pageSize));
-  const paginatedTypes = filteredTypes.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const totalPages = Math.max(1, pagination.lastPage);
+  const paginatedTypes = groupTypes;
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -123,7 +119,7 @@ export default function GroupTypesModule() {
           descripcion: createForm.descripcion.trim(),
           abreviacion: createForm.abreviacion.trim() || undefined
         });
-        await loadGroupTypes(appliedSearch);
+        await loadGroupTypes(appliedSearch, currentPage);
         setCreateForm(emptyForm);
         setCreateError("");
         setCreateOpen(false);
@@ -152,7 +148,7 @@ export default function GroupTypesModule() {
           descripcion: editForm.descripcion.trim(),
           abreviacion: editForm.abreviacion.trim() || undefined
         });
-        await loadGroupTypes(appliedSearch);
+        await loadGroupTypes(appliedSearch, currentPage);
         setEditOpen(false);
         setSelected(null);
         setEditForm(emptyForm);
@@ -176,7 +172,7 @@ export default function GroupTypesModule() {
     void (async () => {
       try {
         await apiDelete(withId(config.endpoints.groupTypes.delete, record.id));
-        await loadGroupTypes(appliedSearch);
+        await loadGroupTypes(appliedSearch, currentPage);
       } catch (error) {
         console.error("[GroupTypesModule] Delete error:", error);
         window.alert("No se pudo eliminar el tipo de grupo.");
@@ -193,14 +189,21 @@ export default function GroupTypesModule() {
             <h2 className="mt-2 text-2xl font-semibold">Gestion de tipos de grupos</h2>
             <p className="mt-1 text-sm text-white/75">Define y organiza categorias para la estructura de areas y grupos.</p>
           </div>
-          <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold">{isLoading ? <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" /> : `${filteredTypes.length} registros`}</span>
+          <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold">{isLoading ? <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" /> : `${pagination.total} registros`}</span>
         </div>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Tipos de grupos</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : groupTypes.length}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Layers className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Tipos de grupos</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : pagination.total}</p>
+            </div>
+          </div>
         </article>
       </div>
 
@@ -216,7 +219,8 @@ export default function GroupTypesModule() {
           <button type="button" onClick={() => { setSearch(""); setAppliedSearch(""); setCurrentPage(1); }} className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground">
             Limpiar
           </button>
-          <button type="button" onClick={() => { setCreateError(""); setCreateForm(emptyForm); setCreateOpen(true); }} className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white">
+          <button type="button" onClick={() => { setCreateError(""); setCreateForm(emptyForm); setCreateOpen(true); }} className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white">
+            <Plus className="h-4 w-4" />
             Crear tipo de grupo
           </button>
         </div>
@@ -248,7 +252,8 @@ export default function GroupTypesModule() {
                     <td className="px-4 py-3">{item.abreviacion || "-"}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => openEdit(item)} className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                        <button type="button" onClick={() => openEdit(item)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                          <Pencil className="h-3.5 w-3.5" />
                           Editar
                         </button>
                         <button
@@ -256,8 +261,9 @@ export default function GroupTypesModule() {
                           onClick={() => removeType(item)}
                           disabled={item.groups_count > 0}
                           title={item.groups_count > 0 ? "No se puede eliminar porque tiene grupos asociados" : ""}
-                          className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                         >
+                          <Trash2 className="h-3.5 w-3.5" />
                           Eliminar
                         </button>
                       </div>
@@ -277,7 +283,7 @@ export default function GroupTypesModule() {
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
-        <p className="text-muted-foreground">Mostrando {paginatedTypes.length} de {filteredTypes.length} tipos de grupos</p>
+        <p className="text-muted-foreground">Mostrando {paginatedTypes.length} de {pagination.total} tipos de grupos</p>
         <div className="flex items-center gap-2">
           <button type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
             Anterior

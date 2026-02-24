@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { withId } from "@/config/llapiy-config";
 import { config } from "@/config/llapiy-config";
-import { apiDelete, apiGet, apiPost, apiPut, downloadWebReport, toList, unwrapData } from "@/lib/llapiy-api";
+import { apiDelete, apiGet, apiPost, apiPut, downloadWebReport, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
 import { useAuthPermissions } from "@/lib/use-auth-permissions";
+import { Archive, Building2, CheckCircle2, Clock3, Eye, FileDown, Pencil, Plus, Trash2 } from "lucide-react";
 
 type Block = {
   id: number;
@@ -41,6 +42,8 @@ type AreaOption = { id: number; descripcion: string };
 const months = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
 const empty: BlockForm = { n_bloque: "", asunto: "", folios: "", rango_inicial: "", rango_final: "", fecha: "", root_url: "", area_id: "", role_id: "" };
+const emptyFilters = { asunto: "", area_id: "", role_id: "", year: "", month: "" };
+const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 function mapApiBlock(item: any): Block {
   const areaName =
@@ -112,8 +115,14 @@ export default function BlocksModule() {
   const [areas, setAreas] = useState<AreaOption[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [f, setF] = useState({ asunto: "", area_id: "", role_id: "", year: "", month: "" });
+  const [f, setF] = useState(emptyFilters);
+  const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
   const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationMeta>(emptyPagination);
+  const [years, setYears] = useState<number[]>([]);
+  const [totalBlocks, setTotalBlocks] = useState(0);
+  const [attendedBlocks, setAttendedBlocks] = useState(0);
+  const [unattendedBlocks, setUnattendedBlocks] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [showOpen, setShowOpen] = useState(false);
@@ -128,15 +137,35 @@ export default function BlocksModule() {
 
   const canUploadBlock = canByPermission("blocks.upload");
 
-  const loadBlocks = async () => {
+  const loadBlocks = async (filtersValue = appliedFilters, pageValue = page) => {
     setIsLoading(true);
     try {
       const response = await apiGet<{
         blocks: { data: any[] } | any[];
         areas?: any[];
         roles?: any[];
-      }>(config.endpoints.blocks.list);
-      const data = unwrapData(response) as { blocks?: unknown; areas?: unknown; roles?: unknown };
+        years?: (number | string)[];
+        totalBlocks?: number;
+        attendedBlocksCount?: number;
+        unattendedBlocksCount?: number;
+      }>(config.endpoints.blocks.list, {
+        asunto: filtersValue.asunto || undefined,
+        area_id: filtersValue.area_id || undefined,
+        role_id: filtersValue.role_id || undefined,
+        year: filtersValue.year || undefined,
+        month: filtersValue.month || undefined,
+        page: pageValue
+      });
+      const data = unwrapData(response) as {
+        blocks?: unknown;
+        areas?: unknown;
+        roles?: unknown;
+        years?: unknown;
+        totalBlocks?: unknown;
+        attendedBlocksCount?: unknown;
+        unattendedBlocksCount?: unknown;
+      };
+      const nextPagination = getPaginationMeta(data?.blocks);
       const next = toList<any>(data?.blocks).map(mapApiBlock).filter((item) => item.id > 0);
       const nextAreas = toList<any>(data?.areas).map((item) => ({
         id: Number(item?.id ?? 0),
@@ -155,6 +184,16 @@ export default function BlocksModule() {
       }
       setRoles(nextRoles);
       setBlocks(next);
+      setPagination(nextPagination);
+      setYears(
+        toList<any>(data?.years)
+          .map((value) => Number(value ?? 0))
+          .filter((value) => value > 0)
+          .sort((a, b) => b - a)
+      );
+      setTotalBlocks(Number(data?.totalBlocks ?? nextPagination.total ?? 0));
+      setAttendedBlocks(Number(data?.attendedBlocksCount ?? 0));
+      setUnattendedBlocks(Number(data?.unattendedBlocksCount ?? 0));
     } finally {
       setIsLoading(false);
     }
@@ -163,36 +202,21 @@ export default function BlocksModule() {
   useEffect(() => {
     const load = async () => {
       try {
-        await loadBlocks();
+        await loadBlocks(appliedFilters, page);
       } catch (error) {
         console.error("[BlocksModule] Load error:", error);
       }
     };
 
     void load();
-  }, []);
+  }, [appliedFilters, page]);
 
-  const filtered = useMemo(
-    () =>
-      blocks.filter((b) => {
-        const dt = new Date(b.fecha);
-        return (
-          (!f.asunto || b.asunto.toLowerCase().includes(f.asunto.toLowerCase())) &&
-          (!f.area_id || String(b.area_id) === f.area_id) &&
-          (!f.role_id || String(b.role_id) === f.role_id) &&
-          (!f.year || String(dt.getFullYear()) === f.year) &&
-          (!f.month || String(dt.getMonth() + 1) === f.month)
-        );
-      }),
-    [blocks, f]
-  );
+  const rows = blocks;
+  const totalPages = Math.max(1, pagination.lastPage);
 
-  const years = useMemo(() => [...new Set(blocks.map((b) => new Date(b.fecha).getFullYear()))].sort((a, b) => b - a), [blocks]);
-  const attended = blocks.filter((b) => b.box).length;
-  const unattended = blocks.length - attended;
-  const pageSize = 8;
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const rows = filtered.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const validate = (form: BlockForm) => {
     if (!form.n_bloque.trim()) return "Ingrese el numero de bloque.";
@@ -217,7 +241,7 @@ export default function BlocksModule() {
           rango_final: Number(createForm.rango_final),
           fecha: createForm.fecha
         });
-        await loadBlocks();
+        await loadBlocks(appliedFilters, page);
         setCreateErr("");
         setCreateForm(empty);
         setCreateOpen(false);
@@ -256,7 +280,7 @@ export default function BlocksModule() {
           await apiPut(withId(config.endpoints.blocks.upload, sel.id), formData);
         }
 
-        await loadBlocks();
+        await loadBlocks(appliedFilters, page);
         setEditErr("");
         setEditOpen(false);
         setSel(null);
@@ -280,7 +304,7 @@ export default function BlocksModule() {
     void (async () => {
       try {
         await apiDelete(withId(config.endpoints.blocks.delete, block.id));
-        await loadBlocks();
+        await loadBlocks(appliedFilters, page);
       } catch (error) {
         console.error("[BlocksModule] Delete error:", error);
         window.alert("No se pudo eliminar el bloque.");
@@ -312,15 +336,55 @@ export default function BlocksModule() {
       <header className="rounded-2xl border border-border bg-gradient-to-r from-slate-900 to-emerald-700 p-5 text-white shadow-sm">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div><p className="text-xs uppercase tracking-[0.24em] text-white/60">Control de bloques</p><h2 className="mt-2 text-2xl font-semibold">Gestion de bloques</h2></div>
-          <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold">{isLoading ? <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" /> : `${filtered.length} registros`}</span>
+          <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold">{isLoading ? <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" /> : `${pagination.total} registros`}</span>
         </div>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <article className="rounded-xl border border-border bg-card p-4 shadow-sm"><p className="text-xs text-muted-foreground">Total de bloques</p><p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : blocks.length}</p></article>
-        <article className="rounded-xl border border-border bg-card p-4 shadow-sm"><p className="text-xs text-muted-foreground">Areas registradas</p><p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : areas.length}</p></article>
-        <article className="rounded-xl border border-border bg-card p-4 shadow-sm"><p className="text-xs text-muted-foreground">Bloques atendidos</p><p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : attended}</p></article>
-        <article className="rounded-xl border border-border bg-card p-4 shadow-sm"><p className="text-xs text-muted-foreground">Bloques sin atender</p><p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : unattended}</p></article>
+        <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Archive className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total de bloques</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : totalBlocks}</p>
+            </div>
+          </div>
+        </article>
+        <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Building2 className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Areas registradas</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : areas.length}</p>
+            </div>
+          </div>
+        </article>
+        <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <CheckCircle2 className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Bloques atendidos</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : attendedBlocks}</p>
+            </div>
+          </div>
+        </article>
+        <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Clock3 className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Bloques sin atender</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : unattendedBlocks}</p>
+            </div>
+          </div>
+        </article>
       </div>
 
       <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
@@ -332,17 +396,19 @@ export default function BlocksModule() {
           <select value={f.month} onChange={(e) => setF((p) => ({ ...p, month: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Mes</option>{months.map((m, i) => <option key={m} value={String(i + 1)}>{m}</option>)}</select>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          <button type="button" onClick={() => { setCreateErr(""); setCreateForm(empty); setCreateOpen(true); }} className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white">Ingresar bloque</button>
+          <button type="button" onClick={() => { setPage(1); setAppliedFilters({ ...f }); }} className="h-10 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground">Aplicar filtros</button>
+          <button type="button" onClick={() => { setCreateErr(""); setCreateForm(empty); setCreateOpen(true); }} className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white"><Plus className="h-4 w-4" />Ingresar bloque</button>
           <button
             type="button"
-            disabled={!filtered.length}
-            title={!filtered.length ? "Para generar un reporte debe existir al menos un bloque." : ""}
-            onClick={() => void downloadBlocksReport(f)}
-            className="h-10 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!pagination.total}
+            title={!pagination.total ? "Para generar un reporte debe existir al menos un bloque." : ""}
+            onClick={() => void downloadBlocksReport(appliedFilters)}
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
+            <FileDown className="h-4 w-4" />
             Generar reporte
           </button>
-          <button type="button" onClick={() => setF({ asunto: "", area_id: "", role_id: "", year: "", month: "" })} className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground">Limpiar</button>
+          <button type="button" onClick={() => { setF(emptyFilters); setAppliedFilters(emptyFilters); setPage(1); }} className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground">Limpiar</button>
         </div>
       </div>
 
@@ -359,8 +425,23 @@ export default function BlocksModule() {
                 </tr>
               )) : rows.length ? rows.map((b, i) => (
                 <tr key={b.id} className="border-t border-border">
-                  <td className="px-4 py-3">{(page - 1) * pageSize + i + 1}</td><td className="px-4 py-3 font-semibold text-foreground">{b.n_bloque}</td><td className="px-4 py-3">{b.asunto}</td><td className="px-4 py-3">{b.folios || "-"}</td>
-                  <td className="px-4 py-3"><div className="flex justify-end gap-2"><button type="button" onClick={() => { setSel(b); setShowOpen(true); }} className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">Ver</button><button type="button" onClick={() => openEdit(b)} className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">Editar</button><button type="button" onClick={() => removeBlock(b)} className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white">Eliminar</button></div></td>
+                  <td className="px-4 py-3">{(pagination.from || 1) + i}</td><td className="px-4 py-3 font-semibold text-foreground">{b.n_bloque}</td><td className="px-4 py-3">{b.asunto}</td><td className="px-4 py-3">{b.folios || "-"}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex justify-end gap-2">
+                      <button type="button" onClick={() => { setSel(b); setShowOpen(true); }} className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                        <Eye className="h-3.5 w-3.5" />
+                        Ver
+                      </button>
+                      <button type="button" onClick={() => openEdit(b)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                        <Pencil className="h-3.5 w-3.5" />
+                        Editar
+                      </button>
+                      <button type="button" onClick={() => removeBlock(b)} className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white">
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Eliminar
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               )) : <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-muted-foreground">No se encontraron bloques.</td></tr>}
             </tbody>
@@ -369,7 +450,7 @@ export default function BlocksModule() {
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
-        <p className="text-muted-foreground">Mostrando {rows.length} de {filtered.length} bloques</p>
+        <p className="text-muted-foreground">Mostrando {rows.length} de {pagination.total} bloques</p>
         <div className="flex items-center gap-2">
           <button type="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">Anterior</button>
           <span className="text-xs text-muted-foreground">Pagina {page} de {totalPages}</span>

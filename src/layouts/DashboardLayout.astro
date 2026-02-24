@@ -301,8 +301,13 @@ const navSections = (sections ?? defaultSections).map((section) => ({
       submenuToggles.forEach((button) => {
         button.addEventListener("click", () => {
           const item = button.closest("[data-sidebar-item]");
-          if (!item || appShell?.classList.contains("sidebar-collapsed"))
+          if (!item) return;
+          if (appShell?.classList.contains("sidebar-collapsed")) {
+            setCollapsed(false);
+            item.classList.add("is-open");
+            button.setAttribute("aria-expanded", "true");
             return;
+          }
           const next = !item.classList.contains("is-open");
           item.classList.toggle("is-open", next);
           button.setAttribute("aria-expanded", String(next));

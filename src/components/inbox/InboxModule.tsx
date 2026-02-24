@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { config, withId } from "@/config/llapiy-config";
-import { apiGet, apiPut, toList, unwrapData } from "@/lib/llapiy-api";
+import { apiGet, apiPut, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
 import { useAuthPermissions } from "@/lib/use-auth-permissions";
+import { CheckCircle2, Clock3, Inbox as InboxIcon } from "lucide-react";
 
 type Area = { id: number; descripcion: string };
 type Section = { id: number; n_section: string };
@@ -38,6 +39,8 @@ const andamios: Andamio[] = [];
 const boxes: Box[] = [];
 
 const emptyStorageForm: StorageForm = { section_id: "", andamio_id: "", box_id: "" };
+const emptyFilters: Filters = { search: "", area_id: "", periodo: "" };
+const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 function Modal({
   open,
@@ -83,8 +86,11 @@ function yearOf(dateText: string) {
 export default function InboxModule() {
   const [blocks, setBlocks] = useState<InboxBlock[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [filters, setFilters] = useState<Filters>({ search: "", area_id: "", periodo: "" });
+  const [filters, setFilters] = useState<Filters>(emptyFilters);
+  const [appliedFilters, setAppliedFilters] = useState<Filters>(emptyFilters);
   const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationMeta>(emptyPagination);
+  const [periods, setPeriods] = useState<string[]>([]);
 
   const [storageOpen, setStorageOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -100,7 +106,7 @@ export default function InboxModule() {
 
   const canUploadBlock = canByPermission("blocks.upload");
 
-  const loadInbox = async () => {
+  const loadInbox = async (filtersValue = appliedFilters, pageValue = currentPage) => {
     setIsLoading(true);
     try {
       const response = await apiGet<{
@@ -113,9 +119,10 @@ export default function InboxModule() {
         attendedBlocksCount: number;
         unattendedBlocksCount: number;
       }>(config.endpoints.inbox.list, {
-        search: filters.search || undefined,
-        area_id: filters.area_id || undefined,
-        fecha: filters.periodo || undefined
+        search: filtersValue.search || undefined,
+        area_id: filtersValue.area_id || undefined,
+        fecha: filtersValue.periodo || undefined,
+        page: pageValue
       });
 
       const data = unwrapData(response) as {
@@ -124,6 +131,7 @@ export default function InboxModule() {
         sections?: unknown;
         andamios?: unknown;
         boxes?: unknown;
+        periodos?: unknown;
         attendedBlocksCount?: number;
         unattendedBlocksCount?: number;
       };
@@ -163,6 +171,13 @@ export default function InboxModule() {
       sections.splice(0, sections.length, ...nextSections);
       andamios.splice(0, andamios.length, ...nextAndamios);
       boxes.splice(0, boxes.length, ...nextBoxes);
+      setPagination(getPaginationMeta(data?.documents));
+      setPeriods(
+        toList<any>(data?.periodos)
+          .map((value) => String(value ?? ""))
+          .filter(Boolean)
+          .sort((a, b) => Number(b) - Number(a))
+      );
       setAttendedCountApi(typeof data?.attendedBlocksCount === "number" ? data.attendedBlocksCount : null);
       setUnattendedCountApi(typeof data?.unattendedBlocksCount === "number" ? data.unattendedBlocksCount : null);
     } finally {
@@ -171,29 +186,16 @@ export default function InboxModule() {
   };
 
   useEffect(() => {
-    void loadInbox().catch((error) => {
+    void loadInbox(appliedFilters, currentPage).catch((error) => {
       console.error("[InboxModule] Load error:", error);
     });
-  }, []);
-
-  const years = useMemo(() => [...new Set(blocks.map((block) => yearOf(block.fecha)).filter(Boolean))].sort((a, b) => Number(b) - Number(a)), [blocks]);
-
-  const filteredBlocks = useMemo(() => {
-    const query = filters.search.trim().toLowerCase();
-    return blocks.filter((block) => {
-      const bySearch = !query || block.asunto.toLowerCase().includes(query) || block.n_bloque.toLowerCase().includes(query);
-      const byArea = !filters.area_id || String(block.area_id) === filters.area_id;
-      const byPeriodo = !filters.periodo || yearOf(block.fecha) === filters.periodo;
-      return bySearch && byArea && byPeriodo;
-    });
-  }, [blocks, filters]);
+  }, [appliedFilters, currentPage]);
 
   const attendedCount = blocks.filter((block) => block.box_id !== null).length;
   const unattendedCount = blocks.length - attendedCount;
 
-  const pageSize = 8;
-  const totalPages = Math.max(1, Math.ceil(filteredBlocks.length / pageSize));
-  const paginatedBlocks = filteredBlocks.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const totalPages = Math.max(1, pagination.lastPage);
+  const paginatedBlocks = blocks;
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -296,22 +298,43 @@ export default function InboxModule() {
             <h2 className="mt-2 text-2xl font-semibold">Gestion de bandeja de entrada</h2>
             <p className="mt-1 text-sm text-white/75">Busca, asigna almacenamiento y registra archivos en un solo lugar.</p>
           </div>
-          <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold">{isLoading ? <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" /> : `${filteredBlocks.length} registros`}</span>
+          <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold">{isLoading ? <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" /> : `${pagination.total} registros`}</span>
         </div>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Bloques en bandeja</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : filteredBlocks.length}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <InboxIcon className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Bloques en bandeja</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : pagination.total}</p>
+            </div>
+          </div>
         </article>
         <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Bloques atendidos</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : (attendedCountApi ?? attendedCount)}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <CheckCircle2 className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Bloques atendidos</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : (attendedCountApi ?? attendedCount)}</p>
+            </div>
+          </div>
         </article>
         <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Bloques sin atender</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : (unattendedCountApi ?? unattendedCount)}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Clock3 className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Bloques sin atender</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : (unattendedCountApi ?? unattendedCount)}</p>
+            </div>
+          </div>
         </article>
       </div>
 
@@ -336,7 +359,7 @@ export default function InboxModule() {
             <label className="mb-1 block text-xs text-muted-foreground">Periodo</label>
             <select value={filters.periodo} onChange={(event) => setFilters((previous) => ({ ...previous, periodo: event.target.value }))} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm">
               <option value="">Todos</option>
-              {years.map((year) => (
+              {periods.map((year) => (
                 <option key={year} value={year}>
                   {year}
                 </option>
@@ -345,10 +368,10 @@ export default function InboxModule() {
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          <button type="button" onClick={() => { setCurrentPage(1); void loadInbox().catch((error) => console.error("[InboxModule] Search error:", error)); }} className="h-10 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground">
+          <button type="button" onClick={() => { setCurrentPage(1); setAppliedFilters({ ...filters }); }} className="h-10 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground">
             Aplicar
           </button>
-          <button type="button" onClick={() => { setFilters({ search: "", area_id: "", periodo: "" }); setCurrentPage(1); void loadInbox().catch((error) => console.error("[InboxModule] Clear error:", error)); }} className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground">
+          <button type="button" onClick={() => { setFilters(emptyFilters); setAppliedFilters(emptyFilters); setCurrentPage(1); }} className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground">
             Limpiar filtros
           </button>
         </div>
@@ -424,7 +447,7 @@ export default function InboxModule() {
           </div>
 
           <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
-            <p className="text-muted-foreground">Mostrando {paginatedBlocks.length} de {filteredBlocks.length} bloques</p>
+            <p className="text-muted-foreground">Mostrando {paginatedBlocks.length} de {pagination.total} bloques</p>
             <div className="flex items-center gap-2">
               <button type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
                 Anterior

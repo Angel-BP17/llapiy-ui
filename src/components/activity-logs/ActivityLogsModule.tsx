@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { config } from "@/config/llapiy-config";
-import { apiGet, downloadWebReport, toList, unwrapData } from "@/lib/llapiy-api";
+import { apiGet, downloadWebReport, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
+import { ClipboardList, Eye, FileDown, LayoutGrid, Users } from "lucide-react";
 
 type User = { id: number; name: string; last_name: string };
 type LogRecord = {
@@ -15,6 +16,8 @@ type LogRecord = {
 };
 
 type Filters = { date: string; user_id: string; module: string };
+const emptyFilters: Filters = { date: "", user_id: "", module: "" };
+const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 function Modal({
   open,
@@ -45,10 +48,6 @@ function Modal({
   );
 }
 
-function toDateInput(value: string) {
-  return value.slice(0, 10);
-}
-
 function toDisplayDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -76,8 +75,11 @@ export default function ActivityLogsModule() {
   const [logs, setLogs] = useState<LogRecord[]>([]);
   const [userOptions, setUserOptions] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [filters, setFilters] = useState<Filters>({ date: "", user_id: "", module: "" });
+  const [filters, setFilters] = useState<Filters>(emptyFilters);
+  const [appliedFilters, setAppliedFilters] = useState<Filters>(emptyFilters);
   const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationMeta>(emptyPagination);
+  const [modules, setModules] = useState<string[]>([]);
   const [dataModalOpen, setDataModalOpen] = useState(false);
   const [dataModalTitle, setDataModalTitle] = useState("");
   const [dataModalData, setDataModalData] = useState<Record<string, unknown> | null>(null);
@@ -105,8 +107,13 @@ export default function ActivityLogsModule() {
           logs: { data: any[] } | any[];
           users: any[];
           modules: string[];
-        }>(config.endpoints.activityLogs.list);
-        const data = unwrapData(response) as { logs?: unknown; users?: unknown };
+        }>(config.endpoints.activityLogs.list, {
+          date: appliedFilters.date || undefined,
+          user_id: appliedFilters.user_id || undefined,
+          module: appliedFilters.module || undefined,
+          page: currentPage
+        });
+        const data = unwrapData(response) as { logs?: unknown; users?: unknown; modules?: unknown };
 
         const nextLogs = toList<any>(data?.logs).map((item) => ({
           id: Number(item?.id ?? 0),
@@ -123,10 +130,13 @@ export default function ActivityLogsModule() {
           name: String(item?.name ?? ""),
           last_name: String(item?.last_name ?? "")
         }));
+        const nextModules = toList<any>(data?.modules).map((moduleName) => String(moduleName ?? "")).filter(Boolean);
 
         if (!ignore) {
           setLogs(nextLogs);
           setUserOptions(nextUsers);
+          setModules([...new Set(nextModules)].sort());
+          setPagination(getPaginationMeta(data?.logs));
         }
       } catch (error) {
         console.error("[ActivityLogsModule] Load error:", error);
@@ -139,22 +149,10 @@ export default function ActivityLogsModule() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [appliedFilters, currentPage]);
 
-  const modules = useMemo(() => [...new Set(logs.map((log) => log.module))].sort(), [logs]);
-
-  const filteredLogs = useMemo(() => {
-    return logs.filter((log) => {
-      const byDate = !filters.date || toDateInput(log.created_at) === filters.date;
-      const byUser = !filters.user_id || String(log.user_id) === filters.user_id;
-      const byModule = !filters.module || log.module === filters.module;
-      return byDate && byUser && byModule;
-    });
-  }, [logs, filters]);
-
-  const pageSize = 8;
-  const totalPages = Math.max(1, Math.ceil(filteredLogs.length / pageSize));
-  const paginatedLogs = filteredLogs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const totalPages = Math.max(1, pagination.lastPage);
+  const paginatedLogs = logs;
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -176,22 +174,43 @@ export default function ActivityLogsModule() {
             <h2 className="mt-2 text-2xl font-semibold">Registro de actividades</h2>
             <p className="mt-1 text-sm text-white/75">Revisa cambios, usuarios y modulos afectados.</p>
           </div>
-          <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold">{isLoading ? <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" /> : `${filteredLogs.length} registros`}</span>
+          <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold">{isLoading ? <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-white/30" /> : `${pagination.total} registros`}</span>
         </div>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Actividades listadas</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : filteredLogs.length}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <ClipboardList className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Actividades listadas</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : pagination.total}</p>
+            </div>
+          </div>
         </article>
         <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Usuarios en filtro</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : userOptions.length}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Users className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Usuarios en filtro</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : userOptions.length}</p>
+            </div>
+          </div>
         </article>
         <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <p className="text-xs text-muted-foreground">Modulos detectados</p>
-          <p className="mt-2 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : modules.length}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <LayoutGrid className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Modulos detectados</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{isLoading ? <span className="inline-block h-8 w-14 animate-pulse rounded bg-muted" /> : modules.length}</p>
+            </div>
+          </div>
         </article>
       </div>
 
@@ -224,16 +243,17 @@ export default function ActivityLogsModule() {
             </select>
           </div>
           <div className="flex items-end gap-2">
-            <button type="button" onClick={() => setCurrentPage(1)} className="h-10 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground">
+            <button type="button" onClick={() => { setCurrentPage(1); setAppliedFilters({ ...filters }); }} className="h-10 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground">
               Buscar
             </button>
-            <button type="button" onClick={() => { setFilters({ date: "", user_id: "", module: "" }); setCurrentPage(1); }} className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground">
+            <button type="button" onClick={() => { setFilters(emptyFilters); setAppliedFilters(emptyFilters); setCurrentPage(1); }} className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground">
               Limpiar
             </button>
           </div>
         </div>
         <div className="mt-4">
-          <button type="button" onClick={() => void downloadActivityReport(filters)} className="h-10 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white">
+          <button type="button" onClick={() => void downloadActivityReport(appliedFilters)} className="inline-flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white">
+            <FileDown className="h-4 w-4" />
             Generar reporte
           </button>
         </div>
@@ -271,7 +291,8 @@ export default function ActivityLogsModule() {
                       <td className="px-4 py-3">{log.module}</td>
                       <td className="px-4 py-3">
                         {log.before ? (
-                          <button type="button" onClick={() => openDataModal("Datos antes", log.before)} className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                          <button type="button" onClick={() => openDataModal("Datos antes", log.before)} className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
+                            <Eye className="h-3.5 w-3.5" />
                             Ver datos
                           </button>
                         ) : (
@@ -280,7 +301,8 @@ export default function ActivityLogsModule() {
                       </td>
                       <td className="px-4 py-3">
                         {log.after ? (
-                          <button type="button" onClick={() => openDataModal("Datos despues", log.after)} className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">
+                          <button type="button" onClick={() => openDataModal("Datos despues", log.after)} className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">
+                            <Eye className="h-3.5 w-3.5" />
                             Ver datos
                           </button>
                         ) : (
@@ -304,7 +326,7 @@ export default function ActivityLogsModule() {
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
-        <p className="text-muted-foreground">Mostrando {paginatedLogs.length} de {filteredLogs.length} actividades</p>
+        <p className="text-muted-foreground">Mostrando {paginatedLogs.length} de {pagination.total} actividades</p>
         <div className="flex items-center gap-2">
           <button type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
             Anterior
