@@ -9,7 +9,7 @@ export const config = {
     auth: {
       login: "/auth/login",
       logout: "/auth/logout",
-      me: "/user"
+      me: "/profile"
     },
     dashboard: {
       index: "/dashboard"

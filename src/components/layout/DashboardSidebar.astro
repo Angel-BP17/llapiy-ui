@@ -1,8 +1,8 @@
-﻿---
+---
 const {
   userName = "ADMIN ADMIN",
   userRole = "Especialista 1 de OCI",
-  sections = []
+  sections = [],
 } = Astro.props;
 ---
 
@@ -11,95 +11,195 @@ const {
   class="fixed inset-y-0 left-0 z-40 flex w-72 -translate-x-full flex-col border-r border-border bg-sidebar text-sidebar-foreground shadow-lg transition-transform duration-200 lg:translate-x-0"
 >
   <div class="border-b border-border px-6 py-5" data-sidebar-user>
-    <div class="flex items-center gap-3">
-      <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary" data-sidebar-avatar>
+    <a href="/perfil" class="flex items-center gap-3 transition-opacity hover:opacity-80 group">
+      <div
+        class="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary group-hover:ring-4 group-hover:ring-primary/5 transition-all"
+        data-sidebar-avatar
+      >
         <svg viewBox="0 0 24 24" class="h-6 w-6" aria-hidden="true">
           <path
             fill="currentColor"
             d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-4.42 0-8 2-8 4.5V20h16v-1.5c0-2.5-3.58-4.5-8-4.5Z"
-          />
+          ></path>
         </svg>
       </div>
-      <div>
-        <p class="text-sm font-semibold text-foreground" data-sidebar-label>{userName}</p>
-        <p class="text-xs text-muted-foreground" data-sidebar-label>{userRole}</p>
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-semibold text-foreground truncate" data-sidebar-label>
+          {userName}
+        </p>
+        <p class="text-xs text-muted-foreground truncate" data-sidebar-label>
+          {userRole}
+        </p>
       </div>
-    </div>
+    </a>
   </div>
 
   <nav class="flex-1 overflow-y-auto px-4 py-6">
-    {sections.map((section) => (
-      <div class="mb-6">
-        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground" data-sidebar-label>
-          {section.title}
-        </p>
-        <ul class="mt-3 space-y-1">
-          {section.items.map((item) => (
-            <li>
-              {item.children?.length ? (
-                <div
-                  class={`group/sidebar ${item.open ?? item.active ? "is-open" : ""}`}
-                  data-sidebar-item
-                  data-active={String(Boolean(item.active))}
-                >
-                  <button
-                    type="button"
-                    data-submenu-toggle
-                    aria-expanded={String(Boolean(item.open ?? item.active))}
-                    class={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors duration-200 ${
+    {
+      sections.map((section) => (
+        <div class="mb-6">
+          <p
+            class="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground"
+            data-sidebar-label
+          >
+            {section.title}
+          </p>
+          <ul class="mt-3 space-y-1">
+            {section.items.map((item) => (
+              <li data-nav-item data-permission={item.permission}>
+                {item.children?.length ? (
+                  <div
+                    class={`group/sidebar ${(item.open ?? item.active) ? "is-open" : ""}`}
+                    data-sidebar-item
+                    data-active={String(Boolean(item.active))}
+                  >
+                    <button
+                      type="button"
+                      data-submenu-toggle
+                      aria-expanded={String(Boolean(item.open ?? item.active))}
+                      class={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors duration-200 ${
+                        item.active
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                      }`}
+                    >
+                      <span
+                        class="flex h-5 w-5 items-center justify-center shrink-0"
+                        set:html={item.icon}
+                      />
+                      <span class="min-w-0 flex-1" data-sidebar-label>
+                        {item.label}
+                      </span>
+                      <span
+                        class="text-xs text-muted-foreground transition-transform duration-300 ease-out"
+                        data-sidebar-icon
+                        data-sidebar-label
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          class="h-4 w-4"
+                          aria-hidden="true"
+                        >
+                          <path
+                            fill="currentColor"
+                            d="M8.59 16.59 13.17 12 8.59 7.41 10 6l6 6-6 6Z"
+                          />
+                        </svg>
+                      </span>
+                    </button>
+
+                    <div
+                      class="submenu-panel mt-1 overflow-hidden"
+                      data-submenu-panel
+                    >
+                      <ul class="space-y-1 pl-11" data-sidebar-label>
+                        {item.children.map((child) => (
+                          <li data-nav-child data-permission={child.permission}>
+                            <a
+                              href={child.href}
+                              class={`block rounded-lg px-3 py-2 text-sm transition ${
+                                child.active
+                                  ? "bg-primary/15 font-semibold text-foreground"
+                                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                              }`}
+                            >
+                              {child.label}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ) : (
+                  <a
+                    href={item.href}
+                    class={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
                       item.active
                         ? "bg-primary text-primary-foreground shadow-sm"
                         : "text-muted-foreground hover:bg-accent hover:text-foreground"
                     }`}
                   >
-                    <span class="flex h-5 w-5 items-center justify-center shrink-0" set:html={item.icon} />
-                    <span class="min-w-0 flex-1" data-sidebar-label>{item.label}</span>
-                    <span class="text-xs text-muted-foreground transition-transform duration-300 ease-out" data-sidebar-icon data-sidebar-label>
-                      <svg viewBox="0 0 24 24" class="h-4 w-4" aria-hidden="true">
-                        <path
-                          fill="currentColor"
-                          d="M8.59 16.59 13.17 12 8.59 7.41 10 6l6 6-6 6Z"
-                        />
-                      </svg>
+                    <span
+                      class="flex h-5 w-5 items-center justify-center shrink-0"
+                      set:html={item.icon}
+                    />
+                    <span class="flex-1" data-sidebar-label>
+                      {item.label}
                     </span>
-                  </button>
-
-                  <div class="submenu-panel mt-1 overflow-hidden" data-submenu-panel>
-                    <ul class="space-y-1 pl-11" data-sidebar-label>
-                      {item.children.map((child) => (
-                        <li>
-                          <a
-                            href={child.href}
-                            class={`block rounded-lg px-3 py-2 text-sm transition ${
-                              child.active
-                                ? "bg-primary/15 font-semibold text-foreground"
-                                : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                            }`}
-                          >
-                            {child.label}
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              ) : (
-                <a
-                  href={item.href}
-                  class={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                    item.active
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                  }`}
-                >
-                  <span class="flex h-5 w-5 items-center justify-center shrink-0" set:html={item.icon} />
-                  <span class="flex-1" data-sidebar-label>{item.label}</span>
-                </a>
-              )}
-            </li>
-          ))}
-        </ul>
-      </div>
-    ))}
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))
+    }
   </nav>
 </aside>
+<script>
+  import { can as canPermission, getAuthSession } from "@/lib/auth-session";
+
+  const applyNavigationVisibility = (session) => {
+    // Filtrar ítems principales
+    document.querySelectorAll("[data-nav-item]").forEach((node) => {
+      const permission = node.getAttribute("data-permission");
+      if (!permission) return;
+      const visible = canPermission(session, permission);
+      node.classList.toggle("hidden", !visible);
+    });
+
+    // Filtrar hijos (submenús)
+    document.querySelectorAll("[data-nav-child]").forEach((node) => {
+      const permission = node.getAttribute("data-permission");
+      if (!permission) return;
+      const visible = canPermission(session, permission);
+      node.classList.toggle("hidden", !visible);
+    });
+
+    // Ocultar secciones vacías (opcional, pero recomendado por UX)
+    document.querySelectorAll(".mb-6").forEach((section) => {
+      const hasVisibleItems = Array.from(section.querySelectorAll("[data-nav-item]")).some(
+        (item) => !item.classList.contains("hidden")
+      );
+      section.classList.toggle("hidden", !hasVisibleItems);
+    });
+  };
+
+  const authPayloadString = localStorage.getItem("llapiy_auth_payload");
+  if (authPayloadString) {
+    try {
+      const authPayload = JSON.parse(authPayloadString);
+      const user = authPayload.user;
+
+      const fullName = `${user?.name || ""} ${user?.last_name || ""}`.trim();
+      const userRole = user?.roles?.[0]?.name;
+
+      const sidebar = document.getElementById("dashboard-sidebar");
+
+      if (sidebar) {
+        // Cargar sesión y aplicar visibilidad
+        void getAuthSession().then(applyNavigationVisibility);
+
+        if (fullName) {
+          const userNameElement = sidebar.querySelector(
+            '[data-sidebar-label][class*="font-semibold"]',
+          );
+          if (userNameElement) {
+            userNameElement.textContent = fullName;
+          }
+        }
+
+        if (userRole) {
+          const userRoleElement = sidebar.querySelector(
+            '[data-sidebar-label][class*="text-xs"]',
+          );
+          if (userRoleElement) {
+            userRoleElement.textContent = userRole;
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error parsing auth payload:", e);
+    }
+  }
+</script>

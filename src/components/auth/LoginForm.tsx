@@ -1,6 +1,5 @@
 ﻿import { useState } from "react";
-import { config } from "@/config/llapiy-config";
-import { apiPost, unwrapData } from "@/lib/llapiy-api";
+import { AuthService } from "@/services/AuthService";
 import { clearAuthSessionCache, getAuthSession } from "@/lib/auth-session";
 
 interface LoginFormProps {
@@ -21,17 +20,11 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
     setIsSubmitting(true);
 
     try {
-      const payload = await apiPost<{
-        token?: string;
-        access_token?: string;
-        token_type?: string;
-        user?: unknown;
-      }>(config.endpoints.auth.login, {
+      const result = await AuthService.login({
         user_name: userName,
         password
       });
 
-      const result = unwrapData(payload);
       const token = result?.token ?? result?.access_token ?? null;
 
       localStorage.setItem("llapiy_authenticated", "true");
@@ -52,16 +45,8 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       if (!onSuccess) {
         window.location.assign("/");
       }
-    } catch (error: unknown) {
-      console.error("[LoginForm] Error:", error);
-      const message =
-        typeof error === "object" &&
-        error !== null &&
-        "message" in error &&
-        typeof (error as { message?: unknown }).message === "string"
-          ? (error as { message: string }).message
-          : "Error de conexion. Intenta nuevamente.";
-      setErrorMessage(message);
+    } catch (error: any) {
+      setErrorMessage(error?.message || "Error de conexion. Intenta nuevamente.");
     } finally {
       setIsSubmitting(false);
     }

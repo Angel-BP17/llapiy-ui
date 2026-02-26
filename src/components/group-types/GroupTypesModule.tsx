@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
-import { config, withId } from "@/config/llapiy-config";
-import { apiDelete, apiGet, apiPost, apiPut, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
+import type { FormEvent } from "react";
+import { withId } from "@/config/llapiy-config";
+import { getPaginationMeta, toList } from "@/lib/llapiy-api";
 import { Layers, Pencil, Plus, Trash2 } from "lucide-react";
+import { Modal } from "@/components/ui/modal";
+import { MetadataService } from "@/services/MetadataService";
 
 type GroupTypeRecord = {
   id: number;
@@ -17,34 +19,7 @@ type GroupTypeForm = {
 };
 
 const emptyForm: GroupTypeForm = { descripcion: "", abreviacion: "" };
-const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
-
-function Modal({
-  open,
-  title,
-  onClose,
-  children
-}: {
-  open: boolean;
-  title: string;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
-      <div className="max-h-[92vh] w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card shadow-xl">
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h3 className="text-base font-semibold text-foreground">{title}</h3>
-          <button type="button" onClick={onClose} className="rounded-md border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-accent">
-            Cerrar
-          </button>
-        </div>
-        <div className="max-h-[calc(92vh-72px)] overflow-y-auto px-5 py-5">{children}</div>
-      </div>
-    </div>
-  );
-}
+const emptyPagination = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 export default function GroupTypesModule() {
   const [groupTypes, setGroupTypes] = useState<GroupTypeRecord[]>([]);
@@ -52,7 +27,7 @@ export default function GroupTypesModule() {
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const [pagination, setPagination] = useState<PaginationMeta>(emptyPagination);
+  const [pagination, setPagination] = useState(emptyPagination);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -65,11 +40,7 @@ export default function GroupTypesModule() {
   const loadGroupTypes = async (searchValue = "", pageValue = currentPage) => {
     setIsLoading(true);
     try {
-      const response = await apiGet<{ groupTypes: { data: any[] } | any[] }>(config.endpoints.groupTypes.list, {
-        search: searchValue || undefined,
-        page: pageValue
-      });
-      const data = unwrapData(response) as { groupTypes?: unknown };
+      const data = await MetadataService.getGroupTypes(searchValue, pageValue);
       const next = toList<any>(data?.groupTypes).map((item) => ({
         id: Number(item?.id ?? 0),
         descripcion: String(item?.descripcion ?? ""),
@@ -78,34 +49,20 @@ export default function GroupTypesModule() {
       }));
       setGroupTypes(next);
       setPagination(getPaginationMeta(data?.groupTypes));
+    } catch (error) {
+      console.error("[GroupTypesModule] Load error:", error);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    void loadGroupTypes(appliedSearch, currentPage).catch((error) => {
-      console.error("[GroupTypesModule] Load error:", error);
-    });
+    void loadGroupTypes(appliedSearch, currentPage);
   }, [appliedSearch, currentPage]);
-
-  const totalPages = Math.max(1, pagination.lastPage);
-  const paginatedTypes = groupTypes;
-
-  useEffect(() => {
-    if (currentPage > totalPages) setCurrentPage(totalPages);
-  }, [currentPage, totalPages]);
 
   const validate = (form: GroupTypeForm): string | null => {
     if (!form.descripcion.trim()) return "Ingrese la descripcion.";
     return null;
-  };
-
-  const openEdit = (record: GroupTypeRecord) => {
-    setSelected(record);
-    setEditError("");
-    setEditForm({ descripcion: record.descripcion, abreviacion: record.abreviacion });
-    setEditOpen(true);
   };
 
   const submitCreate = (event: FormEvent<HTMLFormElement>) => {
@@ -115,7 +72,7 @@ export default function GroupTypesModule() {
 
     void (async () => {
       try {
-        await apiPost(config.endpoints.groupTypes.create, {
+        await MetadataService.createGroupType({
           descripcion: createForm.descripcion.trim(),
           abreviacion: createForm.abreviacion.trim() || undefined
         });
@@ -123,15 +80,8 @@ export default function GroupTypesModule() {
         setCreateForm(emptyForm);
         setCreateError("");
         setCreateOpen(false);
-      } catch (apiError: unknown) {
-        const message =
-          typeof apiError === "object" &&
-          apiError !== null &&
-          "message" in apiError &&
-          typeof (apiError as { message?: unknown }).message === "string"
-            ? (apiError as { message: string }).message
-            : "No se pudo crear el tipo de grupo.";
-        setCreateError(message);
+      } catch (apiError: any) {
+        setCreateError(apiError?.message || "No se pudo crear el tipo de grupo.");
       }
     })();
   };
@@ -144,24 +94,16 @@ export default function GroupTypesModule() {
 
     void (async () => {
       try {
-        await apiPut(withId(config.endpoints.groupTypes.update, selected.id), {
+        await MetadataService.updateGroupType(selected.id, {
           descripcion: editForm.descripcion.trim(),
           abreviacion: editForm.abreviacion.trim() || undefined
         });
         await loadGroupTypes(appliedSearch, currentPage);
         setEditOpen(false);
         setSelected(null);
-        setEditForm(emptyForm);
         setEditError("");
-      } catch (apiError: unknown) {
-        const message =
-          typeof apiError === "object" &&
-          apiError !== null &&
-          "message" in apiError &&
-          typeof (apiError as { message?: unknown }).message === "string"
-            ? (apiError as { message: string }).message
-            : "No se pudo actualizar el tipo de grupo.";
-        setEditError(message);
+      } catch (apiError: any) {
+        setEditError(apiError?.message || "No se pudo actualizar el tipo de grupo.");
       }
     })();
   };
@@ -171,7 +113,7 @@ export default function GroupTypesModule() {
     if (!window.confirm("Estas seguro de eliminar este tipo de grupo?")) return;
     void (async () => {
       try {
-        await apiDelete(withId(config.endpoints.groupTypes.delete, record.id));
+        await MetadataService.deleteGroupType(record.id);
         await loadGroupTypes(appliedSearch, currentPage);
       } catch (error) {
         console.error("[GroupTypesModule] Delete error:", error);
@@ -179,6 +121,8 @@ export default function GroupTypesModule() {
       }
     })();
   };
+
+  const totalPages = Math.max(1, pagination.lastPage);
 
   return (
     <section className="space-y-5">
@@ -245,14 +189,14 @@ export default function GroupTypesModule() {
                     </td>
                   </tr>
                 ))
-              ) : paginatedTypes.length ? (
-                paginatedTypes.map((item) => (
+              ) : groupTypes.length ? (
+                groupTypes.map((item) => (
                   <tr key={item.id} className="border-t border-border">
                     <td className="px-4 py-3 font-semibold text-foreground">{item.descripcion}</td>
                     <td className="px-4 py-3">{item.abreviacion || "-"}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => openEdit(item)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                        <button type="button" onClick={() => { setSelected(item); setEditError(""); setEditForm({ descripcion: item.descripcion, abreviacion: item.abreviacion }); setEditOpen(true); }} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
                           <Pencil className="h-3.5 w-3.5" />
                           Editar
                         </button>
@@ -283,7 +227,7 @@ export default function GroupTypesModule() {
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
-        <p className="text-muted-foreground">Mostrando {paginatedTypes.length} de {pagination.total} tipos de grupos</p>
+        <p className="text-muted-foreground">Mostrando {groupTypes.length} de {pagination.total} tipos de grupos</p>
         <div className="flex items-center gap-2">
           <button type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
             Anterior

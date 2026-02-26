@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { FormEvent } from "react";
 import { config, withParams } from "@/config/llapiy-config";
-import { apiDelete, apiGet, apiPost, apiPut, toList, unwrapData } from "@/lib/llapiy-api";
+import { toList, unwrapData, apiDelete, apiGet, apiPost, apiPut } from "@/lib/llapiy-api";
+import { Modal } from "@/components/ui/modal";
 import {
   type Andamio,
   type Archivo,
@@ -99,35 +100,6 @@ function resolveViewFromQueryString(queryString: string): ViewState | null {
     return { level: "sections" };
   }
   return null;
-}
-
-function Modal({
-  open,
-  title,
-  onClose,
-  children,
-  maxWidth = "max-w-lg"
-}: {
-  open: boolean;
-  title: string;
-  onClose: () => void;
-  children: ReactNode;
-  maxWidth?: string;
-}) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
-      <div className={`max-h-[92vh] w-full overflow-hidden rounded-2xl border border-border bg-card shadow-xl ${maxWidth}`}>
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h3 className="text-base font-semibold text-foreground">{title}</h3>
-          <button type="button" onClick={onClose} className="rounded-md border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-accent">
-            Cerrar
-          </button>
-        </div>
-        <div className="max-h-[calc(92vh-72px)] overflow-y-auto px-5 py-5">{children}</div>
-      </div>
-    </div>
-  );
 }
 
 function normalize(value: string) {

@@ -1,0 +1,13 @@
+---
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import ProfileModule from "../../components/auth/ProfileModule";
+---
+
+<DashboardLayout title="Mi Perfil">
+  <header class="mb-6">
+    <p class="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">Configuración</p>
+    <h1 class="mt-2 text-2xl font-semibold text-foreground">Mi Perfil</h1>
+  </header>
+
+  <ProfileModule client:load />
+</DashboardLayout>

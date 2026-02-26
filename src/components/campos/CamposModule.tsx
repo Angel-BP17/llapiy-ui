@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import type { Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
-import { config, withId } from "@/config/llapiy-config";
-import { apiDelete, apiGet, apiPost, apiPut, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
+import type { Dispatch, FormEvent, SetStateAction } from "react";
+import { withId } from "@/config/llapiy-config";
+import { getPaginationMeta, toList } from "@/lib/llapiy-api";
 import { ListChecks, Pencil, Plus, Trash2 } from "lucide-react";
+import { Modal } from "@/components/ui/modal";
+import { MetadataService } from "@/services/MetadataService";
 
 type DataType = "string" | "text" | "char" | "int" | "float" | "double" | "boolean" | "enum";
 
@@ -39,37 +41,7 @@ const emptyForm: CampoForm = {
   allow_zero: true,
   enum_values_text: ""
 };
-const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
-
-function Modal({
-  open,
-  title,
-  onClose,
-  children,
-  maxWidth = "max-w-3xl"
-}: {
-  open: boolean;
-  title: string;
-  onClose: () => void;
-  children: ReactNode;
-  maxWidth?: string;
-}) {
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
-      <div className={`max-h-[92vh] w-full overflow-hidden rounded-2xl border border-border bg-card shadow-xl ${maxWidth}`}>
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h3 className="text-base font-semibold text-foreground">{title}</h3>
-          <button type="button" onClick={onClose} className="rounded-md border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-accent">
-            Cerrar
-          </button>
-        </div>
-        <div className="max-h-[calc(92vh-72px)] overflow-y-auto px-5 py-5">{children}</div>
-      </div>
-    </div>
-  );
-}
+const emptyPagination = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 function toForm(campo: CampoRecord): CampoForm {
   return {
@@ -96,22 +68,6 @@ function validateForm(form: CampoForm): string | null {
   if (form.data_type === "char" && form.length && Number(form.length) > 1) return "Para CHAR la longitud maxima es 1.";
   if (form.data_type === "enum" && !parseEnumValues(form.enum_values_text).length) return "Ingrese valores para el enum.";
   return null;
-}
-
-function normalizeCampo(form: CampoForm, id: number, documentTypesCount = 0): CampoRecord {
-  const enumValues = form.data_type === "enum" ? parseEnumValues(form.enum_values_text) : [];
-  const isNumeric = ["int", "float", "double"].includes(form.data_type);
-  return {
-    id,
-    name: form.name.trim(),
-    data_type: form.data_type,
-    is_nullable: form.is_nullable,
-    length: form.length ? Number(form.length) : null,
-    allow_negative: isNumeric ? form.allow_negative : false,
-    allow_zero: isNumeric ? form.allow_zero : true,
-    enum_values: enumValues,
-    document_types_count: documentTypesCount
-  };
 }
 
 function CampoFormFields({
@@ -251,7 +207,7 @@ export default function CamposModule() {
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const [pagination, setPagination] = useState<PaginationMeta>(emptyPagination);
+  const [pagination, setPagination] = useState(emptyPagination);
   const [totalCamposCount, setTotalCamposCount] = useState(0);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -265,14 +221,7 @@ export default function CamposModule() {
   const loadCampos = async (searchValue = "", pageValue = currentPage) => {
     setIsLoading(true);
     try {
-      const response = await apiGet<{
-        campos: { data: any[] } | any[];
-        totalCampos?: number;
-      }>(config.endpoints.campos.list, {
-        search: searchValue || undefined,
-        page: pageValue
-      });
-      const data = unwrapData(response) as { campos?: unknown; totalCampos?: unknown };
+      const data = await MetadataService.getCampos(searchValue, pageValue);
       const next = toList<any>(data?.campos).map((item) => ({
         id: Number(item?.id ?? 0),
         name: String(item?.name ?? ""),
@@ -282,36 +231,22 @@ export default function CamposModule() {
         allow_negative: Boolean(item?.allow_negative ?? false),
         allow_zero: Boolean(item?.allow_zero ?? true),
         enum_values: Array.isArray(item?.enum_values) ? item.enum_values.map((value: unknown) => String(value)) : [],
-        document_types_count: Number(item?.document_types_count ?? item?.document_types_count ?? 0)
+        document_types_count: Number(item?.document_types_count ?? 0)
       }));
       setCampos(next);
       const nextPagination = getPaginationMeta(data?.campos);
       setPagination(nextPagination);
       setTotalCamposCount(Number(data?.totalCampos ?? nextPagination.total ?? 0));
+    } catch (error) {
+      console.error("[CamposModule] Load error:", error);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    void loadCampos(appliedSearch, currentPage).catch((error) => {
-      console.error("[CamposModule] Load error:", error);
-    });
+    void loadCampos(appliedSearch, currentPage);
   }, [appliedSearch, currentPage]);
-
-  const totalPages = Math.max(1, pagination.lastPage);
-  const paginatedCampos = campos;
-
-  useEffect(() => {
-    if (currentPage > totalPages) setCurrentPage(totalPages);
-  }, [currentPage, totalPages]);
-
-  const openEdit = (campo: CampoRecord) => {
-    setSelected(campo);
-    setEditError("");
-    setEditForm(toForm(campo));
-    setEditOpen(true);
-  };
 
   const submitCreate = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -323,7 +258,7 @@ export default function CamposModule() {
 
     void (async () => {
       try {
-        await apiPost(config.endpoints.campos.create, {
+        await MetadataService.createCampo({
           name: createForm.name.trim(),
           data_type: createForm.data_type,
           is_nullable: createForm.is_nullable,
@@ -336,15 +271,8 @@ export default function CamposModule() {
         setCreateOpen(false);
         setCreateForm(emptyForm);
         setCreateError("");
-      } catch (apiError: unknown) {
-        const message =
-          typeof apiError === "object" &&
-          apiError !== null &&
-          "message" in apiError &&
-          typeof (apiError as { message?: unknown }).message === "string"
-            ? (apiError as { message: string }).message
-            : "No se pudo crear el campo.";
-        setCreateError(message);
+      } catch (apiError: any) {
+        setCreateError(apiError?.message || "No se pudo crear el campo.");
       }
     })();
   };
@@ -360,7 +288,7 @@ export default function CamposModule() {
 
     void (async () => {
       try {
-        await apiPut(withId(config.endpoints.campos.update, selected.id), {
+        await MetadataService.updateCampo(selected.id, {
           name: editForm.name.trim(),
           data_type: editForm.data_type,
           is_nullable: editForm.is_nullable,
@@ -373,15 +301,8 @@ export default function CamposModule() {
         setEditOpen(false);
         setSelected(null);
         setEditError("");
-      } catch (apiError: unknown) {
-        const message =
-          typeof apiError === "object" &&
-          apiError !== null &&
-          "message" in apiError &&
-          typeof (apiError as { message?: unknown }).message === "string"
-            ? (apiError as { message: string }).message
-            : "No se pudo actualizar el campo.";
-        setEditError(message);
+      } catch (apiError: any) {
+        setEditError(apiError?.message || "No se pudo actualizar el campo.");
       }
     })();
   };
@@ -391,7 +312,7 @@ export default function CamposModule() {
     if (!window.confirm(`Eliminar el campo ${campo.name}?`)) return;
     void (async () => {
       try {
-        await apiDelete(withId(config.endpoints.campos.delete, campo.id));
+        await MetadataService.deleteCampo(campo.id);
         await loadCampos(appliedSearch, currentPage);
       } catch (error) {
         console.error("[CamposModule] Delete error:", error);
@@ -399,6 +320,8 @@ export default function CamposModule() {
       }
     })();
   };
+
+  const totalPages = Math.max(1, pagination.lastPage);
 
   return (
     <section className="space-y-5">
@@ -469,8 +392,8 @@ export default function CamposModule() {
                     </td>
                   </tr>
                 ))
-              ) : paginatedCampos.length ? (
-                paginatedCampos.map((campo, index) => (
+              ) : campos.length ? (
+                campos.map((campo, index) => (
                   <tr key={campo.id} className="border-t border-border">
                     <td className="px-4 py-3">{(pagination.from || 1) + index}</td>
                     <td className="px-4 py-3 font-semibold text-foreground">{campo.name}</td>
@@ -487,7 +410,7 @@ export default function CamposModule() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => openEdit(campo)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                        <button type="button" onClick={() => { setSelected(campo); setEditError(""); setEditForm(toForm(campo)); setEditOpen(true); }} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
                           <Pencil className="h-3.5 w-3.5" />
                           Editar
                         </button>
@@ -518,16 +441,12 @@ export default function CamposModule() {
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
-        <p className="text-muted-foreground">
-          Mostrando {paginatedCampos.length} de {pagination.total} campos
-        </p>
+        <p className="text-muted-foreground">Mostrando {campos.length} de {pagination.total} campos</p>
         <div className="flex items-center gap-2">
           <button type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
             Anterior
           </button>
-          <span className="text-xs text-muted-foreground">
-            Pagina {currentPage} de {totalPages}
-          </span>
+          <span className="text-xs text-muted-foreground">Pagina {currentPage} de {totalPages}</span>
           <button type="button" disabled={currentPage >= totalPages} onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
             Siguiente
           </button>

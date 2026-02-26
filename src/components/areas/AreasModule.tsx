@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
-import { config, withId } from "@/config/llapiy-config";
-import { apiDelete, apiGet, apiPost, apiPut, toList, unwrapData } from "@/lib/llapiy-api";
-import { Building2, Eye, Pencil, Plus, Trash2 } from "lucide-react";
+import type { FormEvent } from "react";
+import { withId } from "@/config/llapiy-config";
+import { Building2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Modal } from "@/components/ui/modal";
+import { AreaCard } from "./AreaCard";
+import { SubgroupTreeView, subgroupTree, type SubgroupRecord } from "./SubgroupTree";
+import { AreaService } from "@/services/AreaService";
 
 type AreaRecord = {
   id: number;
@@ -23,14 +26,6 @@ type GroupRecord = {
   abreviacion: string;
 };
 
-type SubgroupRecord = {
-  id: number;
-  group_id: number;
-  descripcion: string;
-  abreviacion: string;
-  parent_subgroup_id: number | null;
-};
-
 type AreaForm = {
   descripcion: string;
   abreviacion: string;
@@ -48,11 +43,6 @@ type SubgroupForm = {
   parent_subgroup_id: string;
 };
 
-const areasSeed: AreaRecord[] = [];
-const groupTypesSeed: GroupType[] = [];
-const groupsSeed: GroupRecord[] = [];
-const subgroupsSeed: SubgroupRecord[] = [];
-
 const emptyAreaForm: AreaForm = { descripcion: "", abreviacion: "" };
 const emptyGroupForm: GroupForm = { descripcion: "", abreviacion: "", group_type_id: "" };
 const emptySubgroupForm: SubgroupForm = { descripcion: "", abreviacion: "", parent_subgroup_id: "" };
@@ -67,83 +57,11 @@ function getApiErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
-function Modal({
-  open,
-  title,
-  onClose,
-  children,
-  maxWidth = "max-w-3xl"
-}: {
-  open: boolean;
-  title: string;
-  onClose: () => void;
-  children: ReactNode;
-  maxWidth?: string;
-}) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
-      <div className={`max-h-[92vh] w-full overflow-hidden rounded-2xl border border-border bg-card shadow-xl ${maxWidth}`}>
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h3 className="text-base font-semibold text-foreground">{title}</h3>
-          <button type="button" onClick={onClose} className="rounded-md border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-accent">
-            Cerrar
-          </button>
-        </div>
-        <div className="max-h-[calc(92vh-72px)] overflow-y-auto px-5 py-5">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function subgroupTree(groupId: number, subgroups: SubgroupRecord[]) {
-  const byParent = new Map<number | null, SubgroupRecord[]>();
-  subgroups
-    .filter((item) => item.group_id === groupId)
-    .forEach((item) => {
-      const list = byParent.get(item.parent_subgroup_id) ?? [];
-      list.push(item);
-      byParent.set(item.parent_subgroup_id, list);
-    });
-  return byParent;
-}
-
-function SubgroupTreeView({
-  parentId,
-  tree,
-  onDelete
-}: {
-  parentId: number | null;
-  tree: Map<number | null, SubgroupRecord[]>;
-  onDelete: (id: number) => void;
-}) {
-  const items = tree.get(parentId) ?? [];
-  if (!items.length) return null;
-
-  return (
-    <ul className="mt-2 space-y-2 border-l border-border pl-3">
-      {items.map((item) => (
-        <li key={item.id}>
-          <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-2 py-1.5 text-xs">
-            <span className="font-semibold text-foreground">{item.descripcion}</span>
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{item.abreviacion}</span>
-            <button type="button" onClick={() => onDelete(item.id)} className="ml-auto inline-flex items-center gap-1 rounded bg-red-600 px-2 py-1 text-[10px] font-semibold text-white">
-              <Trash2 className="h-3 w-3" />
-              Eliminar
-            </button>
-          </div>
-          <SubgroupTreeView parentId={item.id} tree={tree} onDelete={onDelete} />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 export default function AreasModule() {
-  const [areas, setAreas] = useState<AreaRecord[]>(areasSeed);
-  const [groups, setGroups] = useState<GroupRecord[]>(groupsSeed);
-  const [subgroups, setSubgroups] = useState<SubgroupRecord[]>(subgroupsSeed);
-  const [groupTypes, setGroupTypes] = useState<GroupType[]>(groupTypesSeed);
+  const [areas, setAreas] = useState<AreaRecord[]>([]);
+  const [groups, setGroups] = useState<GroupRecord[]>([]);
+  const [subgroups, setSubgroups] = useState<SubgroupRecord[]>([]);
+  const [groupTypes, setGroupTypes] = useState<GroupType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -160,54 +78,11 @@ export default function AreasModule() {
   const loadAreasData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [areasResponse, groupTypesResponse] = await Promise.all([
-        apiGet<{ areas: any[] }>(config.endpoints.areas.list),
-        apiGet<{ groupTypes: { data: any[] } | any[] }>(config.endpoints.groupTypes.list)
-      ]);
-
-      const areasData = unwrapData(areasResponse) as { areas?: unknown };
-      const typesData = unwrapData(groupTypesResponse) as { groupTypes?: unknown };
-
-      const nextAreas = toList<any>(areasData?.areas).map((area) => ({
-        id: Number(area?.id ?? 0),
-        descripcion: String(area?.descripcion ?? ""),
-        abreviacion: String(area?.abreviacion ?? "")
-      }));
-
-      const nextGroups: GroupRecord[] = [];
-      const nextSubgroups: SubgroupRecord[] = [];
-
-      toList<any>(areasData?.areas).forEach((area) => {
-        toList<any>(area?.groups).forEach((group) => {
-          nextGroups.push({
-            id: Number(group?.id ?? 0),
-            area_id: Number(area?.id ?? 0),
-            group_type_id: Number(group?.area_group_type?.group_type?.id ?? 0),
-            descripcion: String(group?.descripcion ?? ""),
-            abreviacion: String(group?.abreviacion ?? "")
-          });
-
-          toList<any>(group?.subgroups).forEach((subgroup) => {
-            nextSubgroups.push({
-              id: Number(subgroup?.id ?? 0),
-              group_id: Number(group?.id ?? 0),
-              descripcion: String(subgroup?.descripcion ?? ""),
-              abreviacion: String(subgroup?.abreviacion ?? ""),
-              parent_subgroup_id: Number(subgroup?.parent_subgroup_id ?? 0) || null
-            });
-          });
-        });
-      });
-
-      const nextTypes = toList<any>(typesData?.groupTypes).map((item) => ({
-        id: Number(item?.id ?? 0),
-        descripcion: String(item?.descripcion ?? "")
-      }));
-
-      setAreas(nextAreas);
-      setGroups(nextGroups);
-      setSubgroups(nextSubgroups);
-      setGroupTypes(nextTypes);
+      const data = await AreaService.getFullStructure();
+      setAreas(data.areas);
+      setGroups(data.groups);
+      setSubgroups(data.subgroups);
+      setGroupTypes(data.groupTypes);
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error, "No se pudo cargar el modulo de areas."));
     } finally {
@@ -270,7 +145,7 @@ export default function AreasModule() {
     void (async () => {
       setIsSubmitting(true);
       try {
-        await apiPost(config.endpoints.areas.create, {
+        await AreaService.createArea({
           descripcion: areaForm.descripcion.trim(),
           abreviacion: areaForm.abreviacion.trim() || undefined
         });
@@ -297,7 +172,7 @@ export default function AreasModule() {
     void (async () => {
       setIsSubmitting(true);
       try {
-        await apiPut(withId(config.endpoints.areas.update, selectedArea.id), {
+        await AreaService.updateArea(selectedArea.id, {
           descripcion: areaForm.descripcion.trim(),
           abreviacion: areaForm.abreviacion.trim() || undefined
         });
@@ -321,7 +196,7 @@ export default function AreasModule() {
     void (async () => {
       setIsSubmitting(true);
       try {
-        await apiDelete(withId(config.endpoints.areas.delete, areaId));
+        await AreaService.deleteArea(areaId);
         await loadAreasData();
         setSelectedArea((previous) => (previous?.id === areaId ? null : previous));
       } catch (error) {
@@ -345,7 +220,7 @@ export default function AreasModule() {
       setIsSubmitting(true);
       setErrorMessage("");
       try {
-        await apiPost(config.endpoints.groups.create, {
+        await AreaService.createGroup({
           area_id: selectedArea.id,
           group_type_id: Number(groupForm.group_type_id),
           descripcion: groupForm.descripcion.trim()
@@ -370,7 +245,7 @@ export default function AreasModule() {
     void (async () => {
       setIsSubmitting(true);
       try {
-        await apiPut(withId(config.endpoints.groups.update, group.id), {
+        await AreaService.updateGroup(group.id, {
           descripcion: descripcion.trim(),
           abreviacion: abreviacion.trim() || undefined
         });
@@ -391,7 +266,7 @@ export default function AreasModule() {
     void (async () => {
       setIsSubmitting(true);
       try {
-        await apiDelete(withId(config.endpoints.groups.delete, groupId));
+        await AreaService.deleteGroup(groupId);
         await loadAreasData();
       } catch (error) {
         setErrorMessage(getApiErrorMessage(error, "No se pudo eliminar el grupo."));
@@ -419,7 +294,7 @@ export default function AreasModule() {
       setIsSubmitting(true);
       setErrorMessage("");
       try {
-        await apiPost(config.endpoints.subgroups.create, {
+        await AreaService.createSubgroup({
           group_id: groupId,
           descripcion: form.descripcion.trim(),
           abreviacion: form.abreviacion.trim() || undefined,
@@ -443,18 +318,7 @@ export default function AreasModule() {
     void (async () => {
       setIsSubmitting(true);
       try {
-        const deletionOrder: number[] = [];
-        const collectForDeletion = (nodeId: number) => {
-          subgroups
-            .filter((item) => item.parent_subgroup_id === nodeId)
-            .forEach((child) => collectForDeletion(child.id));
-          deletionOrder.push(nodeId);
-        };
-        collectForDeletion(subgroupId);
-
-        for (const id of deletionOrder) {
-          await apiDelete(withId(config.endpoints.subgroups.delete, id));
-        }
+        await AreaService.deleteSubgroup(subgroupId);
         await loadAreasData();
       } catch (error) {
         setErrorMessage(getApiErrorMessage(error, "No se pudo eliminar el subgrupo."));
@@ -529,31 +393,15 @@ export default function AreasModule() {
           ))
         ) : visibleAreas.length ? (
           visibleAreas.map((area) => (
-            <article key={area.id} className="rounded-xl border border-border bg-card p-4 shadow-sm">
-              <h3 className="text-base font-semibold text-foreground">
-                {area.descripcion} ({area.abreviacion || "-"})
-              </h3>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button type="button" onClick={() => openAreaDetails(area)} className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">
-                  <Eye className="h-3.5 w-3.5" />
-                  Ver grupos y subgrupos
-                </button>
-                <button type="button" onClick={() => openEditArea(area)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
-                  <Pencil className="h-3.5 w-3.5" />
-                  Editar area
-                </button>
-                <button
-                  type="button"
-                  onClick={() => deleteArea(area.id)}
-                  disabled={totalGroupsForArea(area.id) > 0}
-                  title={totalGroupsForArea(area.id) > 0 ? "No se puede eliminar porque tiene grupos asociados" : ""}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Eliminar area
-                </button>
-              </div>
-            </article>
+            <AreaCard 
+              key={area.id} 
+              area={area} 
+              isLoading={isLoading} 
+              totalGroups={totalGroupsForArea(area.id)}
+              onDetails={openAreaDetails}
+              onEdit={openEditArea}
+              onDelete={deleteArea}
+            />
           ))
         ) : (
           <div className="col-span-full rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground shadow-sm">

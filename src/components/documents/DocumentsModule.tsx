@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
-import { config, withId } from "@/config/llapiy-config";
-import { apiDelete, apiGet, apiPost, apiPut, downloadWebReport, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
+import { useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
+import { getPaginationMeta, toList } from "@/lib/llapiy-api";
 import { useAuthPermissions } from "@/lib/use-auth-permissions";
 import { Eye, FileDown, FileText, Pencil, Plus, Tags, Trash2 } from "lucide-react";
+import { Modal } from "@/components/ui/modal";
+import { ArchiveService } from "@/services/ArchiveService";
+import { AreaService } from "@/services/AreaService";
 
 type CampoType = { id: number; name: string; data_type: "string" | "text" | "int" | "boolean" | "enum"; is_nullable?: boolean; enum_values?: string[] };
 type DocType = { id: number; name: string; campo_types: CampoType[] };
@@ -37,17 +39,11 @@ type FormState = {
   campos: Record<number, string>;
 };
 
-const roles: { id: number; name: string }[] = [];
-const areas: { id: number; descripcion: string }[] = [];
-const groups: { id: number; descripcion: string }[] = [];
-const subgroups: { id: number; descripcion: string }[] = [];
 const months = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
-const docTypes: DocType[] = [];
-
 const empty: FormState = { document_type_id: "", n_documento: "", asunto: "", folios: "", fecha: "", root_url: "", area_id: "", group_id: "", subgroup_id: "", role_id: "", campos: {} };
-const emptyFilters = { asunto: "", document_type_id: "", area_id: "", group_id: "", subgroup_id: "", role_id: "", year: "", month: "" };
-const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
+const emptyFilters = { asunto: "", document_type_id: "", area_id: "", group_id: "", subgroup_id: "", year: "", month: "" };
+const emptyPagination = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 function mapApiDocument(item: any): Doc {
   const campos: Campo[] = Array.isArray(item?.campos)
@@ -75,56 +71,14 @@ function mapApiDocument(item: any): Doc {
   };
 }
 
-function Modal({ open, title, onClose, children, maxWidth = "max-w-5xl" }: { open: boolean; title: string; onClose: () => void; children: ReactNode; maxWidth?: string }) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
-      <div className={`max-h-[92vh] w-full overflow-hidden rounded-2xl border border-border bg-card shadow-xl ${maxWidth}`}>
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h3 className="text-base font-semibold text-foreground">{title}</h3>
-          <button type="button" onClick={onClose} className="rounded-md border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-accent">Cerrar</button>
-        </div>
-        <div className="max-h-[calc(92vh-72px)] overflow-y-auto px-5 py-5">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-const getType = (id: string) => docTypes.find((x) => String(x.id) === id) ?? null;
-
-async function downloadDocumentsReport(filters: {
-  asunto: string;
-  document_type_id: string;
-  area_id: string;
-  group_id: string;
-  subgroup_id: string;
-  role_id: string;
-  year: string;
-  month: string;
-}) {
-  try {
-    await downloadWebReport(
-      config.endpoints.documents.pdf,
-        {
-          asunto: filters.asunto || undefined,
-          document_type_id: filters.document_type_id || undefined,
-          area_id: filters.area_id || undefined,
-          group_id: filters.group_id || undefined,
-          subgroup_id: filters.subgroup_id || undefined,
-          role_id: filters.role_id || undefined,
-        year: filters.year || undefined,
-        month: filters.month || undefined
-      },
-      "reporte_documentos.pdf"
-    );
-  } catch (error) {
-    console.error("[DocumentsModule] Report error:", error);
-    window.alert("No se pudo generar el reporte de documentos.");
-  }
-}
-
 export default function DocumentsModule() {
   const [docs, setDocs] = useState<Doc[]>([]);
+  const [roles, setRoles] = useState<{ id: number; name: string }[]>([]);
+  const [allAreas, setAllAreas] = useState<any[]>([]);
+  const [allGroups, setAllGroups] = useState<any[]>([]);
+  const [allSubgroups, setAllSubgroups] = useState<any[]>([]);
+  const [docTypes, setDocTypes] = useState<DocType[]>([]);
+  
   const [isLoading, setIsLoading] = useState(true);
   const [f, setF] = useState(emptyFilters);
   const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
@@ -140,49 +94,29 @@ export default function DocumentsModule() {
   const [editForm, setEditForm] = useState<FormState>(empty);
   const [createErr, setCreateErr] = useState("");
   const [editErr, setEditErr] = useState("");
+  const [createUploadFile, setCreateUploadFile] = useState<File | null>(null);
+  const [createUploadFileName, setCreateUploadFileName] = useState("");
   const [editUploadFile, setEditUploadFile] = useState<File | null>(null);
   const [editUploadFileName, setEditUploadFileName] = useState("");
   const { can: canByPermission } = useAuthPermissions();
 
   const canUploadDocument = canByPermission("documents.upload");
 
+  const loadInitialData = async () => {
+    try {
+      const data = await AreaService.getFullStructure();
+      setAllAreas(data.areas);
+      setAllGroups(data.groups);
+      setAllSubgroups(data.subgroups);
+    } catch (error) {
+      console.error("[DocumentsModule] Organizational structure load error:", error);
+    }
+  };
+
   const loadDocuments = async (filtersValue = appliedFilters, pageValue = page) => {
     setIsLoading(true);
     try {
-      const response = await apiGet<{
-        documents: { data: any[] } | any[];
-        documentTypes?: any[];
-        createDocumentTypes?: any[];
-        document_types?: any[];
-        areas?: any[];
-        groups?: any[];
-        subgroups?: any[];
-        roles?: any[];
-        years?: (number | string)[];
-        totalDocuments?: number;
-      }>(config.endpoints.documents.list, {
-        asunto: filtersValue.asunto || undefined,
-        document_type_id: filtersValue.document_type_id || undefined,
-        area_id: filtersValue.area_id || undefined,
-        group_id: filtersValue.group_id || undefined,
-        subgroup_id: filtersValue.subgroup_id || undefined,
-        role_id: filtersValue.role_id || undefined,
-        year: filtersValue.year || undefined,
-        month: filtersValue.month || undefined,
-        page: pageValue
-      });
-      const data = unwrapData(response) as {
-        documents?: unknown;
-        documentTypes?: unknown;
-        createDocumentTypes?: unknown;
-        document_types?: unknown;
-        areas?: unknown;
-        groups?: unknown;
-        subgroups?: unknown;
-        roles?: unknown;
-        years?: unknown;
-        totalDocuments?: unknown;
-      };
+      const data = await ArchiveService.getDocuments(filtersValue, pageValue);
       const nextPagination = getPaginationMeta(data?.documents);
       const next = toList<any>(data?.documents).map(mapApiDocument).filter((item) => item.id > 0);
       const nextDocTypes = toList<any>(data?.createDocumentTypes ?? data?.documentTypes ?? data?.document_types).map((item) => ({
@@ -196,28 +130,14 @@ export default function DocumentsModule() {
           enum_values: Array.isArray(campo?.enum_values) ? campo.enum_values.map((value: unknown) => String(value)) : []
         }))
       })).filter((item) => item.id > 0);
-      const nextAreas = toList<any>(data?.areas).map((item) => ({
-        id: Number(item?.id ?? 0),
-        descripcion: String(item?.descripcion ?? "")
-      })).filter((item) => item.id > 0);
-      const nextGroups = toList<any>(data?.groups).map((item) => ({
-        id: Number(item?.id ?? 0),
-        descripcion: String(item?.descripcion ?? "")
-      })).filter((item) => item.id > 0);
-      const nextSubgroups = toList<any>(data?.subgroups).map((item) => ({
-        id: Number(item?.id ?? 0),
-        descripcion: String(item?.descripcion ?? "")
-      })).filter((item) => item.id > 0);
       const nextRoles = toList<any>(data?.roles).map((item) => ({
         id: Number(item?.id ?? 0),
         name: String(item?.name ?? "")
       })).filter((item) => item.id > 0);
 
-      docTypes.splice(0, docTypes.length, ...nextDocTypes);
-      areas.splice(0, areas.length, ...nextAreas);
-      groups.splice(0, groups.length, ...nextGroups);
-      subgroups.splice(0, subgroups.length, ...nextSubgroups);
-      roles.splice(0, roles.length, ...nextRoles);
+      setDocTypes(nextDocTypes);
+      setRoles(nextRoles);
+      
       setDocs(next);
       setPagination(nextPagination);
       setYears(
@@ -227,29 +147,52 @@ export default function DocumentsModule() {
           .sort((a, b) => b - a)
       );
       setTotalDocuments(Number(data?.totalDocuments ?? nextPagination.total ?? 0));
+    } catch (error) {
+      console.error("[DocumentsModule] Load error:", error);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        await loadDocuments(appliedFilters, page);
-      } catch (error) {
-        console.error("[DocumentsModule] Load error:", error);
-      }
-    };
+    void loadInitialData();
+  }, []);
 
-    void load();
+  useEffect(() => {
+    void loadDocuments(appliedFilters, page);
   }, [appliedFilters, page]);
 
-  const rows = docs;
+  const filteredGroups = useMemo(() => {
+    if (!f.area_id) return [];
+    return allGroups.filter(g => g.area_id === Number(f.area_id));
+  }, [f.area_id, allGroups]);
+
+  const filteredSubgroups = useMemo(() => {
+    if (!f.group_id) return [];
+    return allSubgroups.filter(s => s.group_id === Number(f.group_id));
+  }, [f.group_id, allSubgroups]);
+
+  const handleFilterChange = (field: string, value: string) => {
+    setF(prev => {
+      const next = { ...prev, [field]: value };
+      if (field === "area_id") {
+        next.group_id = "";
+        next.subgroup_id = "";
+      }
+      if (field === "group_id") {
+        next.subgroup_id = "";
+      }
+      return next;
+    });
+  };
+
   const totalPages = Math.max(1, pagination.lastPage);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+
+  const getType = (id: string) => docTypes.find((x) => String(x.id) === id) ?? null;
 
   const validate = (form: FormState) => {
     if (!form.document_type_id) return "Seleccione un tipo de documento.";
@@ -262,8 +205,6 @@ export default function DocumentsModule() {
     return null;
   };
 
-  const camposFrom = (form: FormState, t: DocType): Campo[] => t.campo_types.map((c) => ({ campo_type_id: c.id, name: c.name, dato: form.campos[c.id] ?? "" }));
-
   const submitCreate = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const err = validate(createForm);
@@ -272,7 +213,7 @@ export default function DocumentsModule() {
     if (!t) return;
     void (async () => {
       try {
-        await apiPost(config.endpoints.documents.create, {
+        const response: any = await ArchiveService.createDocument({
           document_type_id: t.id,
           n_documento: createForm.n_documento.trim(),
           asunto: createForm.asunto.trim(),
@@ -283,19 +224,20 @@ export default function DocumentsModule() {
             dato: createForm.campos[campoType.id] ?? ""
           }))
         });
+
+        const newDocId = response?.data?.id || response?.id;
+        if (newDocId && canUploadDocument && createUploadFile) {
+          await ArchiveService.uploadDocumentFile(newDocId, createUploadFile);
+        }
+
         await loadDocuments(appliedFilters, page);
         setCreateErr("");
         setCreateForm(empty);
+        setCreateUploadFile(null);
+        setCreateUploadFileName("");
         setCreateOpen(false);
-      } catch (apiError: unknown) {
-        const message =
-          typeof apiError === "object" &&
-          apiError !== null &&
-          "message" in apiError &&
-          typeof (apiError as { message?: unknown }).message === "string"
-            ? (apiError as { message: string }).message
-            : "No se pudo crear el documento.";
-        setCreateErr(message);
+      } catch (apiError: any) {
+        setCreateErr(apiError?.message || "No se pudo crear el documento.");
       }
     })();
   };
@@ -309,7 +251,7 @@ export default function DocumentsModule() {
     if (!t) return;
     void (async () => {
       try {
-        await apiPut(withId(config.endpoints.documents.update, sel.id), {
+        await ArchiveService.updateDocument(sel.id, {
           n_documento: editForm.n_documento.trim(),
           asunto: editForm.asunto.trim(),
           folios: editForm.folios.trim(),
@@ -321,9 +263,7 @@ export default function DocumentsModule() {
         });
 
         if (canUploadDocument && editUploadFile) {
-          const formData = new FormData();
-          formData.append("root", editUploadFile);
-          await apiPut(withId(config.endpoints.documents.upload, sel.id), formData);
+          await ArchiveService.uploadDocumentFile(sel.id, editUploadFile);
         }
 
         await loadDocuments(appliedFilters, page);
@@ -332,15 +272,8 @@ export default function DocumentsModule() {
         setSel(null);
         setEditUploadFile(null);
         setEditUploadFileName("");
-      } catch (apiError: unknown) {
-        const message =
-          typeof apiError === "object" &&
-          apiError !== null &&
-          "message" in apiError &&
-          typeof (apiError as { message?: unknown }).message === "string"
-            ? (apiError as { message: string }).message
-            : "No se pudo actualizar el documento.";
-        setEditErr(message);
+      } catch (apiError: any) {
+        setEditErr(apiError?.message || "No se pudo actualizar el documento.");
       }
     })();
   };
@@ -349,7 +282,7 @@ export default function DocumentsModule() {
     if (!window.confirm(`Eliminar ${document.n_documento}?`)) return;
     void (async () => {
       try {
-        await apiDelete(withId(config.endpoints.documents.delete, document.id));
+        await ArchiveService.deleteDocument(document.id);
         await loadDocuments(appliedFilters, page);
       } catch (error) {
         console.error("[DocumentsModule] Delete error:", error);
@@ -379,6 +312,13 @@ export default function DocumentsModule() {
       campos: m
     });
     setEditOpen(true);
+  };
+
+  const handleDownloadReport = () => {
+    void ArchiveService.downloadDocumentsReport(appliedFilters).catch((error) => {
+       console.error("[DocumentsModule] Report error:", error);
+       window.alert("No se pudo generar el reporte.");
+    });
   };
 
   const createType = getType(createForm.document_type_id);
@@ -448,11 +388,34 @@ export default function DocumentsModule() {
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
           <input value={f.asunto} onChange={(e) => setF((p) => ({ ...p, asunto: e.target.value }))} placeholder="Asunto" className="h-10 rounded-lg border border-border bg-background px-3 text-sm" />
           <select value={f.document_type_id} onChange={(e) => setF((p) => ({ ...p, document_type_id: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Tipo</option>{selectableDocTypes.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}</select>
-          <select value={f.area_id} onChange={(e) => setF((p) => ({ ...p, area_id: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Area</option>{areas.map((x) => <option key={x.id} value={String(x.id)}>{x.descripcion}</option>)}</select>
-          <select value={f.role_id} onChange={(e) => setF((p) => ({ ...p, role_id: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Rol</option>{roles.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}</select>
-          <select value={f.group_id} onChange={(e) => setF((p) => ({ ...p, group_id: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Grupo</option>{groups.map((x) => <option key={x.id} value={String(x.id)}>{x.descripcion}</option>)}</select>
-          <select value={f.subgroup_id} onChange={(e) => setF((p) => ({ ...p, subgroup_id: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Subgrupo</option>{subgroups.map((x) => <option key={x.id} value={String(x.id)}>{x.descripcion}</option>)}</select>
-          <select value={f.year} onChange={(e) => setF((p) => ({ ...p, year: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Ano</option>{years.map((y) => <option key={y} value={String(y)}>{y}</option>)}</select>
+          
+          {/* Filtros dependientes */}
+          <select value={f.area_id} onChange={(e) => handleFilterChange("area_id", e.target.value)} className="h-10 rounded-lg border border-border bg-background px-3 text-sm">
+            <option value="">Area</option>
+            {allAreas.map((x) => <option key={x.id} value={String(x.id)}>{x.descripcion}</option>)}
+          </select>
+          
+          <select 
+            value={f.group_id} 
+            onChange={(e) => handleFilterChange("group_id", e.target.value)} 
+            disabled={!f.area_id}
+            className="h-10 rounded-lg border border-border bg-background px-3 text-sm disabled:opacity-50"
+          >
+            <option value="">Grupo</option>
+            {filteredGroups.map((x) => <option key={x.id} value={String(x.id)}>{x.descripcion}</option>)}
+          </select>
+          
+          <select 
+            value={f.subgroup_id} 
+            onChange={(e) => setF((p) => ({ ...p, subgroup_id: e.target.value }))} 
+            disabled={!f.group_id}
+            className="h-10 rounded-lg border border-border bg-background px-3 text-sm disabled:opacity-50"
+          >
+            <option value="">Subgrupo</option>
+            {filteredSubgroups.map((x) => <option key={x.id} value={String(x.id)}>{x.descripcion}</option>)}
+          </select>
+
+          <select value={f.year} onChange={(e) => setF((p) => ({ ...p, year: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Periodo</option>{years.map((y) => <option key={y} value={String(y)}>{y}</option>)}</select>
           <select value={f.month} onChange={(e) => setF((p) => ({ ...p, month: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Mes</option>{months.map((m, i) => <option key={m} value={String(i + 1)}>{m}</option>)}</select>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
@@ -471,7 +434,7 @@ export default function DocumentsModule() {
             type="button"
             disabled={!pagination.total}
             title={!pagination.total ? "Para generar un reporte debe existir al menos un documento." : ""}
-            onClick={() => void downloadDocumentsReport(appliedFilters)}
+            onClick={handleDownloadReport}
             className="inline-flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
             <FileDown className="h-4 w-4" />
@@ -492,7 +455,7 @@ export default function DocumentsModule() {
                     <div className="h-8 animate-pulse rounded bg-muted/70" />
                   </td>
                 </tr>
-              )) : rows.length ? rows.map((d, i) => (
+              )) : docs.length ? docs.map((d, i) => (
                 <tr key={d.id} className="border-t border-border">
                   <td className="px-4 py-3">{(pagination.from || 1) + i}</td><td className="px-4 py-3 font-semibold text-foreground">{d.n_documento}</td><td className="px-4 py-3">{d.asunto}</td><td className="px-4 py-3">{d.folios || "-"}</td><td className="px-4 py-3">{d.document_type_name}</td>
                   <td className="px-4 py-3">
@@ -519,11 +482,11 @@ export default function DocumentsModule() {
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
-        <p className="text-muted-foreground">Mostrando {rows.length} de {pagination.total} documentos</p>
+        <p className="text-muted-foreground">Mostrando {docs.length} de {pagination.total} documentos</p>
         <div className="flex items-center gap-2">
           <button type="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">Anterior</button>
           <span className="text-xs text-muted-foreground">Pagina {page} de {totalPages}</span>
-          <button type="button" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">Siguiente</button>
+          <button type="button" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, page + 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">Siguiente</button>
         </div>
       </div>
 
@@ -536,6 +499,24 @@ export default function DocumentsModule() {
             <input value={createForm.asunto} onChange={(e) => setCreateForm((p) => ({ ...p, asunto: e.target.value }))} placeholder="Asunto" className="h-10 rounded-lg border border-border bg-background px-3 text-sm md:col-span-2" required />
             <input value={createForm.folios} onChange={(e) => setCreateForm((p) => ({ ...p, folios: e.target.value }))} placeholder="Folios" className="h-10 rounded-lg border border-border bg-background px-3 text-sm" />
             <input type="date" value={createForm.fecha} onChange={(e) => setCreateForm((p) => ({ ...p, fecha: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm" required />
+            <div className="md:col-span-2">
+              {canUploadDocument ? (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground">Adjuntar archivo (.pdf)</label>
+                  <input
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] ?? null;
+                      setCreateUploadFile(file);
+                      setCreateUploadFileName(file?.name ?? "");
+                    }}
+                    className="block w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                  />
+                  {createUploadFileName ? <p className="text-xs text-muted-foreground">Seleccionado: {createUploadFileName}</p> : null}
+                </div>
+              ) : null}
+            </div>
           </div>
           <div className="rounded-xl border border-border bg-background p-4"><h4 className="mb-3 text-sm font-semibold text-foreground">Campos adicionales</h4><div className="grid gap-3 md:grid-cols-2">{createType?.campo_types.length ? createType.campo_types.map((c) => <div key={c.id} className="space-y-1"><label className="text-xs font-medium text-muted-foreground">{c.name}</label>{renderCampo(c, createForm, setCreateForm)}</div>) : <p className="text-sm text-muted-foreground">Seleccione un tipo de documento.</p>}</div></div>
           <div className="flex justify-end"><button type="submit" className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">Guardar</button></div>

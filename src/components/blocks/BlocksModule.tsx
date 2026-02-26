@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
-import { withId } from "@/config/llapiy-config";
-import { config } from "@/config/llapiy-config";
-import { apiDelete, apiGet, apiPost, apiPut, downloadWebReport, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
+import type { FormEvent } from "react";
+import { getPaginationMeta, toList } from "@/lib/llapiy-api";
 import { useAuthPermissions } from "@/lib/use-auth-permissions";
 import { Archive, Building2, CheckCircle2, Clock3, Eye, FileDown, Pencil, Plus, Trash2 } from "lucide-react";
+import { Modal } from "@/components/ui/modal";
+import { ArchiveService } from "@/services/ArchiveService";
 
 type Block = {
   id: number;
@@ -42,8 +42,8 @@ type AreaOption = { id: number; descripcion: string };
 const months = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
 const empty: BlockForm = { n_bloque: "", asunto: "", folios: "", rango_inicial: "", rango_final: "", fecha: "", root_url: "", area_id: "", role_id: "" };
-const emptyFilters = { asunto: "", area_id: "", role_id: "", year: "", month: "" };
-const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
+const emptyFilters = { asunto: "", area_id: "", year: "", month: "" };
+const emptyPagination = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 function mapApiBlock(item: any): Block {
   const areaName =
@@ -76,44 +76,9 @@ function mapApiBlock(item: any): Block {
   };
 }
 
-function Modal({ open, title, onClose, children, maxWidth = "max-w-4xl" }: { open: boolean; title: string; onClose: () => void; children: ReactNode; maxWidth?: string }) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
-      <div className={`max-h-[92vh] w-full overflow-hidden rounded-2xl border border-border bg-card shadow-xl ${maxWidth}`}>
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h3 className="text-base font-semibold text-foreground">{title}</h3>
-          <button type="button" onClick={onClose} className="rounded-md border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-accent">Cerrar</button>
-        </div>
-        <div className="max-h-[calc(92vh-72px)] overflow-y-auto px-5 py-5">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-async function downloadBlocksReport(filters: { asunto: string; area_id: string; role_id: string; year: string; month: string }) {
-  try {
-    await downloadWebReport(
-      config.endpoints.blocks.pdf,
-      {
-        asunto: filters.asunto || undefined,
-        area_id: filters.area_id || undefined,
-        role_id: filters.role_id || undefined,
-        year: filters.year || undefined,
-        month: filters.month || undefined
-      },
-      "reporte_bloques.pdf"
-    );
-  } catch (error) {
-    console.error("[BlocksModule] Report error:", error);
-    window.alert("No se pudo generar el reporte de bloques.");
-  }
-}
-
 export default function BlocksModule() {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [areas, setAreas] = useState<AreaOption[]>([]);
-  const [roles, setRoles] = useState<RoleOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [f, setF] = useState(emptyFilters);
   const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
@@ -140,40 +105,12 @@ export default function BlocksModule() {
   const loadBlocks = async (filtersValue = appliedFilters, pageValue = page) => {
     setIsLoading(true);
     try {
-      const response = await apiGet<{
-        blocks: { data: any[] } | any[];
-        areas?: any[];
-        roles?: any[];
-        years?: (number | string)[];
-        totalBlocks?: number;
-        attendedBlocksCount?: number;
-        unattendedBlocksCount?: number;
-      }>(config.endpoints.blocks.list, {
-        asunto: filtersValue.asunto || undefined,
-        area_id: filtersValue.area_id || undefined,
-        role_id: filtersValue.role_id || undefined,
-        year: filtersValue.year || undefined,
-        month: filtersValue.month || undefined,
-        page: pageValue
-      });
-      const data = unwrapData(response) as {
-        blocks?: unknown;
-        areas?: unknown;
-        roles?: unknown;
-        years?: unknown;
-        totalBlocks?: unknown;
-        attendedBlocksCount?: unknown;
-        unattendedBlocksCount?: unknown;
-      };
+      const data = await ArchiveService.getBlocks(filtersValue, pageValue);
       const nextPagination = getPaginationMeta(data?.blocks);
       const next = toList<any>(data?.blocks).map(mapApiBlock).filter((item) => item.id > 0);
       const nextAreas = toList<any>(data?.areas).map((item) => ({
         id: Number(item?.id ?? 0),
         descripcion: String(item?.descripcion ?? "")
-      })).filter((item) => item.id > 0);
-      const nextRoles = toList<any>(data?.roles).map((item) => ({
-        id: Number(item?.id ?? 0),
-        name: String(item?.name ?? "")
       })).filter((item) => item.id > 0);
 
       if (nextAreas.length) {
@@ -182,7 +119,6 @@ export default function BlocksModule() {
         const areasFromBlocks = [...new Map(next.filter((item) => item.area_id).map((item) => [Number(item.area_id), item.area])).entries()].map(([id, descripcion]) => ({ id, descripcion }));
         setAreas(areasFromBlocks);
       }
-      setRoles(nextRoles);
       setBlocks(next);
       setPagination(nextPagination);
       setYears(
@@ -194,29 +130,16 @@ export default function BlocksModule() {
       setTotalBlocks(Number(data?.totalBlocks ?? nextPagination.total ?? 0));
       setAttendedBlocks(Number(data?.attendedBlocksCount ?? 0));
       setUnattendedBlocks(Number(data?.unattendedBlocksCount ?? 0));
+    } catch (error) {
+      console.error("[BlocksModule] Load error:", error);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        await loadBlocks(appliedFilters, page);
-      } catch (error) {
-        console.error("[BlocksModule] Load error:", error);
-      }
-    };
-
-    void load();
+    void loadBlocks(appliedFilters, page);
   }, [appliedFilters, page]);
-
-  const rows = blocks;
-  const totalPages = Math.max(1, pagination.lastPage);
-
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
 
   const validate = (form: BlockForm) => {
     if (!form.n_bloque.trim()) return "Ingrese el numero de bloque.";
@@ -233,7 +156,7 @@ export default function BlocksModule() {
     if (err) return setCreateErr(err);
     void (async () => {
       try {
-        await apiPost(config.endpoints.blocks.create, {
+        await ArchiveService.createBlock({
           n_bloque: createForm.n_bloque.trim(),
           asunto: createForm.asunto.trim(),
           folios: createForm.folios.trim(),
@@ -245,15 +168,8 @@ export default function BlocksModule() {
         setCreateErr("");
         setCreateForm(empty);
         setCreateOpen(false);
-      } catch (apiError: unknown) {
-        const message =
-          typeof apiError === "object" &&
-          apiError !== null &&
-          "message" in apiError &&
-          typeof (apiError as { message?: unknown }).message === "string"
-            ? (apiError as { message: string }).message
-            : "No se pudo crear el bloque.";
-        setCreateErr(message);
+      } catch (apiError: any) {
+        setCreateErr(apiError?.message || "No se pudo crear el bloque.");
       }
     })();
   };
@@ -265,7 +181,7 @@ export default function BlocksModule() {
     if (err) return setEditErr(err);
     void (async () => {
       try {
-        await apiPut(withId(config.endpoints.blocks.update, sel.id), {
+        await ArchiveService.updateBlock(sel.id, {
           n_bloque: editForm.n_bloque.trim(),
           asunto: editForm.asunto.trim(),
           folios: editForm.folios.trim(),
@@ -275,9 +191,7 @@ export default function BlocksModule() {
         });
 
         if (canUploadBlock && editUploadFile) {
-          const formData = new FormData();
-          formData.append("root", editUploadFile);
-          await apiPut(withId(config.endpoints.blocks.upload, sel.id), formData);
+          await ArchiveService.uploadBlockFile(sel.id, editUploadFile);
         }
 
         await loadBlocks(appliedFilters, page);
@@ -286,15 +200,8 @@ export default function BlocksModule() {
         setSel(null);
         setEditUploadFile(null);
         setEditUploadFileName("");
-      } catch (apiError: unknown) {
-        const message =
-          typeof apiError === "object" &&
-          apiError !== null &&
-          "message" in apiError &&
-          typeof (apiError as { message?: unknown }).message === "string"
-            ? (apiError as { message: string }).message
-            : "No se pudo actualizar el bloque.";
-        setEditErr(message);
+      } catch (apiError: any) {
+        setEditErr(apiError?.message || "No se pudo actualizar el bloque.");
       }
     })();
   };
@@ -303,7 +210,7 @@ export default function BlocksModule() {
     if (!window.confirm(`Eliminar ${block.n_bloque}?`)) return;
     void (async () => {
       try {
-        await apiDelete(withId(config.endpoints.blocks.delete, block.id));
+        await ArchiveService.deleteBlock(block.id);
         await loadBlocks(appliedFilters, page);
       } catch (error) {
         console.error("[BlocksModule] Delete error:", error);
@@ -312,24 +219,14 @@ export default function BlocksModule() {
     })();
   };
 
-  const openEdit = (b: Block) => {
-    setSel(b);
-    setEditErr("");
-    setEditUploadFile(null);
-    setEditUploadFileName("");
-    setEditForm({
-      n_bloque: b.n_bloque,
-      asunto: b.asunto,
-      folios: b.folios,
-      rango_inicial: String(b.rango_inicial),
-      rango_final: String(b.rango_final),
-      fecha: b.fecha,
-      root_url: b.root_url,
-      area_id: b.area_id ? String(b.area_id) : "",
-      role_id: b.role_id ? String(b.role_id) : ""
+  const handleDownloadReport = () => {
+    void ArchiveService.downloadBlocksReport(appliedFilters).catch((error) => {
+       console.error("[BlocksModule] Report error:", error);
+       window.alert("No se pudo generar el reporte.");
     });
-    setEditOpen(true);
   };
+
+  const totalPages = Math.max(1, pagination.lastPage);
 
   return (
     <section className="space-y-5">
@@ -388,11 +285,10 @@ export default function BlocksModule() {
       </div>
 
       <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
           <input value={f.asunto} onChange={(e) => setF((p) => ({ ...p, asunto: e.target.value }))} placeholder="Asunto" className="h-10 rounded-lg border border-border bg-background px-3 text-sm" />
           <select value={f.area_id} onChange={(e) => setF((p) => ({ ...p, area_id: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Area</option>{areas.map((a) => <option key={a.id} value={String(a.id)}>{a.descripcion}</option>)}</select>
-          <select value={f.role_id} onChange={(e) => setF((p) => ({ ...p, role_id: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Rol</option>{roles.map((r) => <option key={r.id} value={String(r.id)}>{r.name}</option>)}</select>
-          <select value={f.year} onChange={(e) => setF((p) => ({ ...p, year: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Ano</option>{years.map((y) => <option key={y} value={String(y)}>{y}</option>)}</select>
+          <select value={f.year} onChange={(e) => setF((p) => ({ ...p, year: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Periodo</option>{years.map((y) => <option key={y} value={String(y)}>{y}</option>)}</select>
           <select value={f.month} onChange={(e) => setF((p) => ({ ...p, month: e.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm"><option value="">Mes</option>{months.map((m, i) => <option key={m} value={String(i + 1)}>{m}</option>)}</select>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
@@ -402,7 +298,7 @@ export default function BlocksModule() {
             type="button"
             disabled={!pagination.total}
             title={!pagination.total ? "Para generar un reporte debe existir al menos un bloque." : ""}
-            onClick={() => void downloadBlocksReport(appliedFilters)}
+            onClick={handleDownloadReport}
             className="inline-flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
             <FileDown className="h-4 w-4" />
@@ -423,7 +319,7 @@ export default function BlocksModule() {
                     <div className="h-8 animate-pulse rounded bg-muted/70" />
                   </td>
                 </tr>
-              )) : rows.length ? rows.map((b, i) => (
+              )) : blocks.length ? blocks.map((b, i) => (
                 <tr key={b.id} className="border-t border-border">
                   <td className="px-4 py-3">{(pagination.from || 1) + i}</td><td className="px-4 py-3 font-semibold text-foreground">{b.n_bloque}</td><td className="px-4 py-3">{b.asunto}</td><td className="px-4 py-3">{b.folios || "-"}</td>
                   <td className="px-4 py-3">
@@ -432,7 +328,7 @@ export default function BlocksModule() {
                         <Eye className="h-3.5 w-3.5" />
                         Ver
                       </button>
-                      <button type="button" onClick={() => openEdit(b)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                      <button type="button" onClick={() => { setSel(b); setEditErr(""); setEditUploadFile(null); setEditUploadFileName(""); setEditForm({ n_bloque: b.n_bloque, asunto: b.asunto, folios: b.folios, rango_inicial: String(b.rango_inicial), rango_final: String(b.rango_final), fecha: b.fecha, root_url: b.root_url, area_id: b.area_id ? String(b.area_id) : "", role_id: b.role_id ? String(b.role_id) : "" }); setEditOpen(true); }} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
                         <Pencil className="h-3.5 w-3.5" />
                         Editar
                       </button>
@@ -450,7 +346,7 @@ export default function BlocksModule() {
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
-        <p className="text-muted-foreground">Mostrando {rows.length} de {pagination.total} bloques</p>
+        <p className="text-muted-foreground">Mostrando {blocks.length} de {pagination.total} bloques</p>
         <div className="flex items-center gap-2">
           <button type="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">Anterior</button>
           <span className="text-xs text-muted-foreground">Pagina {page} de {totalPages}</span>

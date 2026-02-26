@@ -5,7 +5,7 @@ import { config } from "../config/llapiy-config";
 const stats = [
   {
     label: "Usuarios registrados",
-    value: 2,
+    value: 0,
     href: "/usuarios",
     permission: "users.view",
     tone: "violet",
@@ -32,7 +32,7 @@ const stats = [
   },
   {
     label: "Tipos de documentos",
-    value: 1,
+    value: 0,
     href: "/tipos-documentos",
     permission: "document-types.view",
     tone: "amber",
@@ -499,14 +499,14 @@ const dashboardBootstrap = JSON.stringify({
       })
         .then((response) => (response.ok ? response.json() : null))
         .then((payload) => {
-          const data = payload?.data;
-          if (!data) return;
+          const statsData = payload?.data || payload;
+          if (!statsData) return;
 
           const statsMap = new Map([
-            ["Usuarios registrados", data.userCount],
-            ["Archivos registrados", data.documentCount],
-            ["Bloques no almacenados", data.totalNoAlmacenados],
-            ["Tipos de documentos", data.documentTypeCount]
+            ["Usuarios registrados", statsData.userCount ?? statsData.totalUsers ?? 0],
+            ["Archivos registrados", statsData.documentCount ?? statsData.totalDocuments ?? 0],
+            ["Bloques no almacenados", statsData.totalNoAlmacenados ?? statsData.unattendedBlocksCount ?? 0],
+            ["Tipos de documentos", statsData.documentTypeCount ?? statsData.totalDocumentTypes ?? 0]
           ]);
 
           document.querySelectorAll("[data-stat-value]").forEach((node) => {
@@ -515,14 +515,14 @@ const dashboardBootstrap = JSON.stringify({
             node.textContent = String(statsMap.get(label));
           });
 
-          dashboardDataState.documentosRecientes = Array.isArray(data.documentosRecientes)
-            ? data.documentosRecientes
+          dashboardDataState.documentosRecientes = Array.isArray(statsData.documentosRecientes)
+            ? statsData.documentosRecientes
             : [];
-          dashboardDataState.documentosPorTipo = Array.isArray(data.documentosPorTipo)
-            ? data.documentosPorTipo
+          dashboardDataState.documentosPorTipo = Array.isArray(statsData.documentosPorTipo)
+            ? statsData.documentosPorTipo
             : [];
-          dashboardDataState.documentosPorMes = Array.isArray(data.documentosPorMes)
-            ? data.documentosPorMes
+          dashboardDataState.documentosPorMes = Array.isArray(statsData.documentosPorMes)
+            ? statsData.documentosPorMes
             : [];
 
           window.dashboardData = { ...dashboardDataState };

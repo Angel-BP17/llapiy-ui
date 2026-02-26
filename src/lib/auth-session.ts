@@ -26,7 +26,7 @@ let inMemory: AuthSession | null = null;
 let pending: Promise<AuthSession> | null = null;
 
 function normalizePermission(value: string) {
-  return value.trim().toLowerCase().replaceAll("_", "-");
+  return value.trim().toLowerCase().replaceAll("_", "-").replaceAll(".", "-");
 }
 
 function unique(items: string[]) {
@@ -180,11 +180,17 @@ async function buildSession() {
   if (getToken()) {
     try {
       const meResponse = await apiGet<UnknownRecord>(config.endpoints.auth.me);
-      const me = unwrapData(meResponse) as UnknownRecord;
-      if (me && typeof me === "object") {
-        user = me;
-        roles = unique([...roles, ...extractRoles(me)]);
-        permissions = normalizePermissionList([...permissions, ...extractPermissions(me)]);
+      const meData = unwrapData(meResponse) as UnknownRecord;
+      
+      if (meData && typeof meData === "object") {
+        // Soporte para respuesta anidada { user: { permissions: [], roles: [] } }
+        const effectiveUser = (meData.user && typeof meData.user === "object") 
+          ? (meData.user as UnknownRecord) 
+          : meData;
+
+        user = effectiveUser;
+        roles = unique([...roles, ...extractRoles(effectiveUser)]);
+        permissions = normalizePermissionList([...permissions, ...extractPermissions(effectiveUser)]);
       }
     } catch {
       // Keep payload fallback.
@@ -233,9 +239,17 @@ export async function getAuthSession(options?: { force?: boolean }) {
 }
 
 export function can(session: AuthSession | null | undefined, permission: string) {
-  if (!session || !permission) return true;
+  if (!session || !permission) return false;
 
-  if (!session.permissions.length) return true;
+  // Bypass para administradores
+  const roles = Array.isArray(session.roles) ? session.roles : [];
+  const isAdmin = roles.some(role => {
+    const r = typeof role === "string" ? role.toUpperCase() : "";
+    return r === "ADMIN" || r === "ADMINISTRADOR";
+  });
+  if (isAdmin) return true;
+
+  if (!session.permissions || !session.permissions.length) return false;
   return session.permissionSet.has(normalizePermission(permission));
 }
 

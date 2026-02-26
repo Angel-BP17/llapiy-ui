@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
-import { config } from "@/config/llapiy-config";
-import { apiGet, downloadWebReport, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
+import { getPaginationMeta, toList } from "@/lib/llapiy-api";
 import { ClipboardList, Eye, FileDown, LayoutGrid, Users } from "lucide-react";
+import { Modal } from "@/components/ui/modal";
+import { LogService } from "@/services/LogService";
 
 type User = { id: number; name: string; last_name: string };
 type LogRecord = {
@@ -17,58 +17,12 @@ type LogRecord = {
 
 type Filters = { date: string; user_id: string; module: string };
 const emptyFilters: Filters = { date: "", user_id: "", module: "" };
-const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
-
-function Modal({
-  open,
-  title,
-  onClose,
-  children,
-  maxWidth = "max-w-3xl"
-}: {
-  open: boolean;
-  title: string;
-  onClose: () => void;
-  children: ReactNode;
-  maxWidth?: string;
-}) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
-      <div className={`max-h-[92vh] w-full overflow-hidden rounded-2xl border border-border bg-card shadow-xl ${maxWidth}`}>
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h3 className="text-base font-semibold text-foreground">{title}</h3>
-          <button type="button" onClick={onClose} className="rounded-md border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-accent">
-            Cerrar
-          </button>
-        </div>
-        <div className="max-h-[calc(92vh-72px)] overflow-y-auto px-5 py-5">{children}</div>
-      </div>
-    </div>
-  );
-}
+const emptyPagination = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 function toDisplayDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return `${date.toLocaleDateString("es-PE")} ${date.toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}`;
-}
-
-async function downloadActivityReport(filters: Filters) {
-  try {
-    await downloadWebReport(
-      config.endpoints.activityLogs.pdf,
-      {
-        date: filters.date || undefined,
-        user_id: filters.user_id || undefined,
-        module: filters.module || undefined
-      },
-      "reporte_actividades.pdf"
-    );
-  } catch (error) {
-    console.error("[ActivityLogsModule] Report error:", error);
-    window.alert("No se pudo generar el reporte de actividades.");
-  }
 }
 
 export default function ActivityLogsModule() {
@@ -78,85 +32,72 @@ export default function ActivityLogsModule() {
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [appliedFilters, setAppliedFilters] = useState<Filters>(emptyFilters);
   const [currentPage, setCurrentPage] = useState(1);
-  const [pagination, setPagination] = useState<PaginationMeta>(emptyPagination);
+  const [pagination, setPagination] = useState(emptyPagination);
   const [modules, setModules] = useState<string[]>([]);
   const [dataModalOpen, setDataModalOpen] = useState(false);
   const [dataModalTitle, setDataModalTitle] = useState("");
   const [dataModalData, setDataModalData] = useState<Record<string, unknown> | null>(null);
 
-  useEffect(() => {
-    let ignore = false;
-
-    const parsePayload = (value: unknown): Record<string, unknown> | null => {
-      if (!value) return null;
-      if (typeof value === "object") return value as Record<string, unknown>;
-      if (typeof value === "string") {
-        try {
-          return JSON.parse(value) as Record<string, unknown>;
-        } catch {
-          return { value };
-        }
-      }
-      return null;
-    };
-
-    const load = async () => {
-      setIsLoading(true);
+  const parsePayload = (value: unknown): Record<string, unknown> | null => {
+    if (!value) return null;
+    if (typeof value === "object") return value as Record<string, unknown>;
+    if (typeof value === "string") {
       try {
-        const response = await apiGet<{
-          logs: { data: any[] } | any[];
-          users: any[];
-          modules: string[];
-        }>(config.endpoints.activityLogs.list, {
-          date: appliedFilters.date || undefined,
-          user_id: appliedFilters.user_id || undefined,
-          module: appliedFilters.module || undefined,
-          page: currentPage
-        });
-        const data = unwrapData(response) as { logs?: unknown; users?: unknown; modules?: unknown };
-
-        const nextLogs = toList<any>(data?.logs).map((item) => ({
-          id: Number(item?.id ?? 0),
-          user_id: Number(item?.user_id ?? 0) || null,
-          action: String(item?.action ?? item?.event ?? "update"),
-          module: String(item?.model ?? "General").replace("App\\Models\\", ""),
-          before: parsePayload(item?.before),
-          after: parsePayload(item?.after),
-          created_at: String(item?.created_at ?? "")
-        }));
-
-        const nextUsers = toList<any>(data?.users).map((item) => ({
-          id: Number(item?.id ?? 0),
-          name: String(item?.name ?? ""),
-          last_name: String(item?.last_name ?? "")
-        }));
-        const nextModules = toList<any>(data?.modules).map((moduleName) => String(moduleName ?? "")).filter(Boolean);
-
-        if (!ignore) {
-          setLogs(nextLogs);
-          setUserOptions(nextUsers);
-          setModules([...new Set(nextModules)].sort());
-          setPagination(getPaginationMeta(data?.logs));
-        }
-      } catch (error) {
-        console.error("[ActivityLogsModule] Load error:", error);
-      } finally {
-        if (!ignore) setIsLoading(false);
+        return JSON.parse(value) as Record<string, unknown>;
+      } catch {
+        return { value };
       }
-    };
+    }
+    return null;
+  };
 
+  const load = async () => {
+    setIsLoading(true);
+    try {
+      const data = await LogService.getAll({
+        date: appliedFilters.date || undefined,
+        user_id: appliedFilters.user_id || undefined,
+        module: appliedFilters.module || undefined,
+      }, currentPage);
+
+      const nextLogs = toList<any>(data?.logs).map((item) => ({
+        id: Number(item?.id ?? 0),
+        user_id: Number(item?.user_id ?? 0) || null,
+        action: String(item?.action ?? item?.event ?? "update"),
+        module: String(item?.model ?? "General").replace("App\\Models\\", ""),
+        before: parsePayload(item?.before),
+        after: parsePayload(item?.after),
+        created_at: String(item?.created_at ?? "")
+      }));
+
+      const nextUsers = toList<any>(data?.users).map((item) => ({
+        id: Number(item?.id ?? 0),
+        name: String(item?.name ?? ""),
+        last_name: String(item?.last_name ?? "")
+      }));
+      const nextModules = toList<any>(data?.modules).map((moduleName) => String(moduleName ?? "")).filter(Boolean);
+
+      setLogs(nextLogs);
+      setUserOptions(nextUsers);
+      setModules([...new Set(nextModules)].sort());
+      setPagination(getPaginationMeta(data?.logs));
+    } catch (error) {
+      console.error("[ActivityLogsModule] Load error:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
     void load();
-    return () => {
-      ignore = true;
-    };
   }, [appliedFilters, currentPage]);
 
-  const totalPages = Math.max(1, pagination.lastPage);
-  const paginatedLogs = logs;
-
-  useEffect(() => {
-    if (currentPage > totalPages) setCurrentPage(totalPages);
-  }, [currentPage, totalPages]);
+  const handleDownloadReport = () => {
+    void LogService.downloadReport(appliedFilters).catch((error) => {
+       console.error("[ActivityLogsModule] Report error:", error);
+       window.alert("No se pudo generar el reporte.");
+    });
+  };
 
   const openDataModal = (title: string, data: Record<string, unknown> | null) => {
     if (!data) return;
@@ -164,6 +105,8 @@ export default function ActivityLogsModule() {
     setDataModalData(data);
     setDataModalOpen(true);
   };
+
+  const totalPages = Math.max(1, pagination.lastPage);
 
   return (
     <section className="space-y-5">
@@ -252,7 +195,7 @@ export default function ActivityLogsModule() {
           </div>
         </div>
         <div className="mt-4">
-          <button type="button" onClick={() => void downloadActivityReport(appliedFilters)} className="inline-flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white">
+          <button type="button" onClick={handleDownloadReport} className="inline-flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white">
             <FileDown className="h-4 w-4" />
             Generar reporte
           </button>
@@ -281,8 +224,8 @@ export default function ActivityLogsModule() {
                     </td>
                   </tr>
                 ))
-              ) : paginatedLogs.length ? (
-                paginatedLogs.map((log) => {
+              ) : logs.length ? (
+                logs.map((log) => {
                   const user = userOptions.find((item) => item.id === log.user_id);
                   return (
                     <tr key={log.id} className="border-t border-border">
@@ -326,7 +269,7 @@ export default function ActivityLogsModule() {
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
-        <p className="text-muted-foreground">Mostrando {paginatedLogs.length} de {pagination.total} actividades</p>
+        <p className="text-muted-foreground">Mostrando {logs.length} de {pagination.total} actividades</p>
         <div className="flex items-center gap-2">
           <button type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
             Anterior

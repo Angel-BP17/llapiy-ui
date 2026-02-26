@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
-import { config, withId } from "@/config/llapiy-config";
-import { apiDelete, apiGet, apiPost, apiPut, getPaginationMeta, toList, unwrapData, type PaginationMeta } from "@/lib/llapiy-api";
+import type { Dispatch, FormEvent, SetStateAction } from "react";
+import { getPaginationMeta, toList } from "@/lib/llapiy-api";
 import { Eye, FileText, ListChecks, Pencil, Plus, Trash2 } from "lucide-react";
+import { Modal } from "@/components/ui/modal";
+import { MetadataService } from "@/services/MetadataService";
 
 type Subgroup = {
   id: number;
@@ -60,9 +61,6 @@ type Filters = {
   subgroupId: string;
 };
 
-const areasCatalog: Area[] = [];
-const campoTypesCatalog: CampoType[] = [];
-
 const emptyForm: DocumentTypeForm = {
   name: "",
   campoTypeIds: [],
@@ -70,7 +68,7 @@ const emptyForm: DocumentTypeForm = {
   subgroupIds: []
 };
 const emptyFilters: Filters = { name: "", areaId: "", groupId: "", subgroupId: "" };
-const emptyPagination: PaginationMeta = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
+const emptyPagination = { currentPage: 1, lastPage: 1, perPage: 0, total: 0, from: 0, to: 0 };
 
 function flattenSubgroups(subgroups: Subgroup[]): Subgroup[] {
   const all: Subgroup[] = [];
@@ -84,87 +82,61 @@ function flattenSubgroups(subgroups: Subgroup[]): Subgroup[] {
 }
 
 function getAreaGroups(area: Area): Group[] {
-  return area.area_group_types.flatMap((areaGroupType) => areaGroupType.groups);
-}
-
-function Modal({
-  open,
-  title,
-  onClose,
-  children,
-  maxWidth = "max-w-5xl"
-}: {
-  open: boolean;
-  title: string;
-  onClose: () => void;
-  children: ReactNode;
-  maxWidth?: string;
-}) {
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
-      <div className={`max-h-[92vh] w-full overflow-hidden rounded-2xl border border-border bg-card shadow-xl ${maxWidth}`}>
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h3 className="text-base font-semibold text-foreground">{title}</h3>
-          <button type="button" onClick={onClose} className="rounded-md border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-accent">
-            Cerrar
-          </button>
-        </div>
-        <div className="max-h-[calc(92vh-72px)] overflow-y-auto px-5 py-5">{children}</div>
-      </div>
-    </div>
-  );
+  return (area.area_group_types || []).flatMap((areaGroupType) => areaGroupType.groups || []);
 }
 
 function DocumentTypeFormFields({
   form,
   setForm,
   error,
-  submitLabel
+  submitLabel,
+  areas,
+  campoTypes
 }: {
   form: DocumentTypeForm;
   setForm: Dispatch<SetStateAction<DocumentTypeForm>>;
   error: string;
   submitLabel: string;
+  areas: Area[];
+  campoTypes: CampoType[];
 }) {
   const [treeSearch, setTreeSearch] = useState("");
   const [campoSearch, setCampoSearch] = useState("");
 
   const groupMap = useMemo(() => {
     const map = new Map<number, Group>();
-    areasCatalog.forEach((area) => getAreaGroups(area).forEach((group) => map.set(group.id, group)));
+    areas.forEach((area) => getAreaGroups(area).forEach((group) => map.set(group.id, group)));
     return map;
-  }, []);
+  }, [areas]);
 
   const subgroupMap = useMemo(() => {
     const map = new Map<number, Subgroup>();
-    areasCatalog.forEach((area) => {
+    areas.forEach((area) => {
       getAreaGroups(area).forEach((group) => {
         flattenSubgroups(group.subgroups).forEach((subgroup) => map.set(subgroup.id, subgroup));
       });
     });
     return map;
-  }, []);
+  }, [areas]);
 
   const filteredAreas = useMemo(() => {
     const query = treeSearch.trim().toLowerCase();
-    if (!query) return areasCatalog;
+    if (!query) return areas;
 
-    return areasCatalog.filter((area) => {
+    return areas.filter((area) => {
       if (area.descripcion.toLowerCase().includes(query)) return true;
       return getAreaGroups(area).some((group) => {
         if (group.descripcion.toLowerCase().includes(query)) return true;
         return flattenSubgroups(group.subgroups).some((subgroup) => subgroup.descripcion.toLowerCase().includes(query));
       });
     });
-  }, [treeSearch]);
+  }, [treeSearch, areas]);
 
   const filteredCampos = useMemo(() => {
     const query = campoSearch.trim().toLowerCase();
-    if (!query) return campoTypesCatalog;
-    return campoTypesCatalog.filter((campo) => campo.name.toLowerCase().includes(query));
-  }, [campoSearch]);
+    if (!query) return campoTypes;
+    return campoTypes.filter((campo) => campo.name.toLowerCase().includes(query));
+  }, [campoSearch, campoTypes]);
 
   const toggleSubgroupRecursive = (subgroup: Subgroup, checked: boolean) => {
     setForm((previous) => {
@@ -241,7 +213,7 @@ function DocumentTypeFormFields({
 
   const selectedGroupLabels = form.groupIds.map((groupId) => groupMap.get(groupId)?.descripcion).filter(Boolean) as string[];
   const selectedSubgroupLabels = form.subgroupIds.map((subgroupId) => subgroupMap.get(subgroupId)?.descripcion).filter(Boolean) as string[];
-  const selectedCampoLabels = form.campoTypeIds.map((campoId) => campoTypesCatalog.find((campo) => campo.id === campoId)?.name).filter(Boolean) as string[];
+  const selectedCampoLabels = form.campoTypeIds.map((campoId) => campoTypes.find((campo) => campo.id === campoId)?.name).filter(Boolean) as string[];
 
   return (
     <div className="space-y-4">
@@ -262,19 +234,19 @@ function DocumentTypeFormFields({
           <div className="mb-3 flex items-center justify-between">
             <h4 className="text-sm font-semibold text-foreground">Areas, grupos y subgrupos</h4>
             <div className="flex gap-2">
-              <button type="button" onClick={() => setForm((previous) => ({ ...previous, groupIds: [], subgroupIds: [] }))} className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground">
+              <button type="button" onClick={() => setForm((previous) => ({ ...previous, groupIds: [], subgroupIds: [] }))} className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground">
                 Limpiar
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  const allGroups = areasCatalog.flatMap((area) => getAreaGroups(area).map((group) => group.id));
-                  const allSubgroups = areasCatalog.flatMap((area) =>
+                  const allGroups = areas.flatMap((area) => getAreaGroups(area).map((group) => group.id));
+                  const allSubgroups = areas.flatMap((area) =>
                     getAreaGroups(area).flatMap((group) => flattenSubgroups(group.subgroups).map((subgroup) => subgroup.id))
                   );
                   setForm((previous) => ({ ...previous, groupIds: allGroups, subgroupIds: allSubgroups }));
                 }}
-                className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground"
+                className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground"
               >
                 Todo
               </button>
@@ -286,7 +258,7 @@ function DocumentTypeFormFields({
               const groups = getAreaGroups(area);
               const areaGroupIds = groups.map((group) => group.id);
               const areaSubgroupIds = groups.flatMap((group) => flattenSubgroups(group.subgroups).map((subgroup) => subgroup.id));
-              const areaChecked = areaGroupIds.every((id) => form.groupIds.includes(id)) && areaSubgroupIds.every((id) => form.subgroupIds.includes(id));
+              const areaChecked = areaGroupIds.length > 0 && areaGroupIds.every((id) => form.groupIds.includes(id)) && areaSubgroupIds.every((id) => form.subgroupIds.includes(id));
 
               return (
                 <div key={area.id} className="rounded-lg border border-border bg-card p-3">
@@ -347,7 +319,7 @@ function DocumentTypeFormFields({
         <div className="rounded-xl border border-border bg-background p-4">
           <div className="mb-3 flex items-center justify-between">
             <h4 className="text-sm font-semibold text-foreground">Campos</h4>
-            <button type="button" onClick={() => setForm((previous) => ({ ...previous, campoTypeIds: [] }))} className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground">
+            <button type="button" onClick={() => setForm((previous) => ({ ...previous, campoTypeIds: [] }))} className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground">
               Limpiar
             </button>
           </div>
@@ -390,17 +362,6 @@ function DocumentTypeFormFields({
   );
 }
 
-function validateDocumentTypeForm(form: DocumentTypeForm): string | null {
-  if (!form.name.trim()) return "Ingrese el nombre del tipo de documento.";
-  if (!form.campoTypeIds.length) return "Seleccione al menos un campo.";
-  if (!form.groupIds.length && !form.subgroupIds.length) return "Seleccione al menos un grupo o subgrupo.";
-  return null;
-}
-
-function toUniqueIds(values: number[]) {
-  return [...new Set(values.filter((value) => Number.isFinite(value) && value > 0))];
-}
-
 function toDocumentTypePayload(form: DocumentTypeForm) {
   return {
     name: form.name.trim(),
@@ -410,21 +371,27 @@ function toDocumentTypePayload(form: DocumentTypeForm) {
   };
 }
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const value = (error as { message?: unknown }).message;
-    if (typeof value === "string" && value.trim()) return value;
-  }
-  return fallback;
+function toUniqueIds(values: number[]) {
+  return [...new Set(values.filter((value) => Number.isFinite(value) && value > 0))];
+}
+
+function validateDocumentTypeForm(form: DocumentTypeForm): string | null {
+  if (!form.name.trim()) return "Ingrese el nombre del tipo de documento.";
+  if (!form.campoTypeIds.length) return "Seleccione al menos un campo.";
+  if (!form.groupIds.length && !form.subgroupIds.length) return "Seleccione al menos un grupo o subgrupo.";
+  return null;
 }
 
 export default function DocumentTypesModule() {
   const [documentTypes, setDocumentTypes] = useState<DocumentTypeRecord[]>([]);
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [campoTypes, setCampoTypes] = useState<CampoType[]>([]);
+  
   const [isLoading, setIsLoading] = useState(true);
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [appliedFilters, setAppliedFilters] = useState<Filters>(emptyFilters);
   const [currentPage, setCurrentPage] = useState(1);
-  const [pagination, setPagination] = useState<PaginationMeta>(emptyPagination);
+  const [pagination, setPagination] = useState(emptyPagination);
   const [totalDocumentTypesCount, setTotalDocumentTypesCount] = useState(0);
   const [totalCamposCount, setTotalCamposCount] = useState(0);
 
@@ -443,37 +410,17 @@ export default function DocumentTypesModule() {
   const loadDocumentTypes = async (filtersValue = appliedFilters, pageValue = currentPage) => {
     setIsLoading(true);
     try {
-      const response = await apiGet<{
-        documentTypes: { data: any[] } | any[];
-        areas: any[];
-        campoTypes: any[];
-        totalDocumentTypes?: number;
-        totalCampos?: number;
-      }>(config.endpoints.documentTypes.list, {
-        name: filtersValue.name || undefined,
-        area_id: filtersValue.areaId || undefined,
-        group_id: filtersValue.groupId || undefined,
-        subgroup_id: filtersValue.subgroupId || undefined,
-        page: pageValue
-      });
-      const data = unwrapData(response) as {
-        documentTypes?: unknown;
-        areas?: unknown;
-        campoTypes?: unknown;
-        totalDocumentTypes?: unknown;
-        totalCampos?: unknown;
-      };
-
-      const nextRecords = toList<any>(data?.documentTypes).map((item) => ({
+      const data = await MetadataService.getDocumentTypes(filtersValue, pageValue);
+      const nextRecords: DocumentTypeRecord[] = toList<any>(data?.documentTypes).map((item) => ({
         id: Number(item?.id ?? 0),
         name: String(item?.name ?? ""),
-        campoTypeIds: toList<any>(item?.campo_types ?? item?.campoTypes).map((campo) => Number(campo?.id ?? 0)).filter(Boolean),
+        campoTypeIds: toList<any>(item?.campo_types || item?.campoTypes).map((campo) => Number(campo?.id ?? 0)).filter(Boolean),
         groupIds: toList<any>(item?.groups).map((group) => Number(group?.id ?? 0)).filter(Boolean),
         subgroupIds: toList<any>(item?.subgroups).map((subgroup) => Number(subgroup?.id ?? 0)).filter(Boolean),
         documentsCount: Number(item?.documents_count ?? 0)
       }));
 
-      const nextAreas = toList<any>(data?.areas).map((area) => ({
+      const nextAreas: Area[] = toList<any>(data?.areas).map((area) => ({
         id: Number(area?.id ?? 0),
         descripcion: String(area?.descripcion ?? ""),
         area_group_types: toList<any>(area?.area_group_types).map((areaGroupType) => ({
@@ -493,15 +440,16 @@ export default function DocumentTypesModule() {
         }))
       }));
 
-      const nextCampos = toList<any>(data?.campoTypes).map((campo) => ({
+      const nextCampos: CampoType[] = toList<any>(data?.campoTypes).map((campo) => ({
         id: Number(campo?.id ?? 0),
         name: String(campo?.name ?? ""),
         data_type: String(campo?.data_type ?? "string")
       }));
 
       setDocumentTypes(nextRecords);
-      areasCatalog.splice(0, areasCatalog.length, ...nextAreas);
-      campoTypesCatalog.splice(0, campoTypesCatalog.length, ...nextCampos);
+      setAreas(nextAreas);
+      setCampoTypes(nextCampos);
+      
       const nextPagination = getPaginationMeta(data?.documentTypes);
       setPagination(nextPagination);
       setTotalDocumentTypesCount(Number(data?.totalDocumentTypes ?? nextPagination.total ?? 0));
@@ -517,26 +465,6 @@ export default function DocumentTypesModule() {
     void loadDocumentTypes(appliedFilters, currentPage);
   }, [appliedFilters, currentPage]);
 
-  const groups = useMemo(() => areasCatalog.flatMap((area) => getAreaGroups(area)), [documentTypes]);
-  const subgroups = useMemo(() => groups.flatMap((group) => flattenSubgroups(group.subgroups)), [groups]);
-  const groupMap = useMemo(() => new Map(groups.map((group) => [group.id, group.descripcion])), [groups]);
-  const subgroupMap = useMemo(() => new Map(subgroups.map((subgroup) => [subgroup.id, subgroup.descripcion])), [subgroups]);
-  const campoMap = useMemo(() => new Map(campoTypesCatalog.map((campo) => [campo.id, campo.name])), [documentTypes]);
-
-  const totalPages = Math.max(1, pagination.lastPage);
-  const paginatedRecords = documentTypes;
-
-  useEffect(() => {
-    if (currentPage > totalPages) setCurrentPage(totalPages);
-  }, [currentPage, totalPages]);
-
-  const openListModal = (title: string, ids: number[], map: Map<number, string>, emptyMessage: string) => {
-    const items = ids.map((id) => map.get(id)).filter(Boolean) as string[];
-    setListTitle(title);
-    setListItems(items.length ? items : [emptyMessage]);
-    setListOpen(true);
-  };
-
   const submitCreate = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const error = validateDocumentTypeForm(createForm);
@@ -547,13 +475,13 @@ export default function DocumentTypesModule() {
 
     void (async () => {
       try {
-        await apiPost(config.endpoints.documentTypes.create, toDocumentTypePayload(createForm));
+        await MetadataService.createDocumentType(toDocumentTypePayload(createForm));
         await loadDocumentTypes(appliedFilters, currentPage);
         setCreateOpen(false);
         setCreateForm(emptyForm);
         setCreateError("");
-      } catch (apiError: unknown) {
-        setCreateError(getErrorMessage(apiError, "No se pudo crear el tipo de documento."));
+      } catch (apiError: any) {
+        setCreateError(apiError?.message || "No se pudo crear el tipo de documento.");
       }
     })();
   };
@@ -570,27 +498,15 @@ export default function DocumentTypesModule() {
 
     void (async () => {
       try {
-        await apiPut(withId(config.endpoints.documentTypes.update, selected.id), toDocumentTypePayload(editForm));
+        await MetadataService.updateDocumentType(selected.id, toDocumentTypePayload(editForm));
         await loadDocumentTypes(appliedFilters, currentPage);
         setEditOpen(false);
         setSelected(null);
         setEditError("");
-      } catch (apiError: unknown) {
-        setEditError(getErrorMessage(apiError, "No se pudo actualizar el tipo de documento."));
+      } catch (apiError: any) {
+        setEditError(apiError?.message || "No se pudo actualizar el tipo de documento.");
       }
     })();
-  };
-
-  const openEdit = (record: DocumentTypeRecord) => {
-    setSelected(record);
-    setEditError("");
-    setEditForm({
-      name: record.name,
-      campoTypeIds: [...record.campoTypeIds],
-      groupIds: [...record.groupIds],
-      subgroupIds: [...record.subgroupIds]
-    });
-    setEditOpen(true);
   };
 
   const deleteRecord = (record: DocumentTypeRecord) => {
@@ -598,13 +514,28 @@ export default function DocumentTypesModule() {
     if (!window.confirm(`Eliminar el tipo de documento ${record.name}?`)) return;
     void (async () => {
       try {
-        await apiDelete(withId(config.endpoints.documentTypes.delete, record.id));
+        await MetadataService.deleteDocumentType(record.id);
         await loadDocumentTypes(appliedFilters, currentPage);
-      } catch (apiError: unknown) {
-        window.alert(getErrorMessage(apiError, "No se pudo eliminar el tipo de documento."));
+      } catch (apiError: any) {
+        window.alert(apiError?.message || "No se pudo eliminar el tipo de documento.");
       }
     })();
   };
+
+  const groups = useMemo(() => areas.flatMap((area) => getAreaGroups(area)), [areas]);
+  const subgroups = useMemo(() => groups.flatMap((group) => flattenSubgroups(group.subgroups)), [groups]);
+  const groupMap = useMemo(() => new Map(groups.map((group) => [group.id, group.descripcion])), [groups]);
+  const subgroupMap = useMemo(() => new Map(subgroups.map((subgroup) => [subgroup.id, subgroup.descripcion])), [subgroups]);
+  const campoMap = useMemo(() => new Map(campoTypes.map((campo) => [campo.id, campo.name])), [campoTypes]);
+
+  const openListModal = (title: string, ids: number[], map: Map<number, string>, emptyMessage: string) => {
+    const items = ids.map((id) => map.get(id)).filter(Boolean) as string[];
+    setListTitle(title);
+    setListItems(items.length ? items : [emptyMessage]);
+    setListOpen(true);
+  };
+
+  const totalPages = Math.max(1, pagination.lastPage);
 
   return (
     <section className="space-y-5">
@@ -649,7 +580,7 @@ export default function DocumentTypesModule() {
           <input value={filters.name} onChange={(event) => setFilters((previous) => ({ ...previous, name: event.target.value }))} placeholder="Nombre" className="h-10 rounded-lg border border-border bg-background px-3 text-sm" />
           <select value={filters.areaId} onChange={(event) => setFilters((previous) => ({ ...previous, areaId: event.target.value }))} className="h-10 rounded-lg border border-border bg-background px-3 text-sm">
             <option value="">Area</option>
-            {areasCatalog.map((area) => (
+            {areas.map((area) => (
               <option key={area.id} value={String(area.id)}>
                 {area.descripcion}
               </option>
@@ -731,8 +662,8 @@ export default function DocumentTypesModule() {
                     </td>
                   </tr>
                 ))
-              ) : paginatedRecords.length ? (
-                paginatedRecords.map((record, index) => (
+              ) : documentTypes.length ? (
+                documentTypes.map((record, index) => (
                   <tr key={record.id} className="border-t border-border">
                     <td className="px-4 py-3">{(pagination.from || 1) + index}</td>
                     <td className="px-4 py-3 font-semibold text-foreground">{record.name}</td>
@@ -756,7 +687,7 @@ export default function DocumentTypesModule() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => openEdit(record)} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
+                        <button type="button" onClick={() => { setSelected(record); setEditError(""); setEditForm({ name: record.name, campoTypeIds: [...record.campoTypeIds], groupIds: [...record.groupIds], subgroupIds: [...record.subgroupIds] }); setEditOpen(true); }} className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white">
                           <Pencil className="h-3.5 w-3.5" />
                           Editar
                         </button>
@@ -788,7 +719,7 @@ export default function DocumentTypesModule() {
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
         <p className="text-muted-foreground">
-          Mostrando {paginatedRecords.length} de {pagination.total} tipos de documentos
+          Mostrando {documentTypes.length} de {pagination.total} tipos de documentos
         </p>
         <div className="flex items-center gap-2">
           <button type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
@@ -805,13 +736,13 @@ export default function DocumentTypesModule() {
 
       <Modal open={createOpen} title="Crear tipo de documento" onClose={() => setCreateOpen(false)} maxWidth="max-w-6xl">
         <form onSubmit={submitCreate}>
-          <DocumentTypeFormFields form={createForm} setForm={setCreateForm} error={createError} submitLabel="Guardar" />
+          <DocumentTypeFormFields form={createForm} setForm={setCreateForm} error={createError} submitLabel="Guardar" areas={areas} campoTypes={campoTypes} />
         </form>
       </Modal>
 
       <Modal open={editOpen} title="Editar tipo de documento" onClose={() => setEditOpen(false)} maxWidth="max-w-6xl">
         <form onSubmit={submitEdit}>
-          <DocumentTypeFormFields form={editForm} setForm={setEditForm} error={editError} submitLabel="Actualizar" />
+          <DocumentTypeFormFields form={editForm} setForm={setEditForm} error={editError} submitLabel="Actualizar" areas={areas} campoTypes={campoTypes} />
         </form>
       </Modal>
 

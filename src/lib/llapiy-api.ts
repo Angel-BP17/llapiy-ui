@@ -212,12 +212,6 @@ export async function downloadWebReport(
   query?: QueryParams,
   fallbackName = "reporte.pdf"
 ) {
-  const reportWindow = window.open("", "_blank");
-  if (reportWindow) {
-    reportWindow.document.title = fallbackName;
-    reportWindow.document.body.innerHTML = "<p style='font-family: sans-serif; padding: 16px;'>Generando reporte...</p>";
-  }
-
   const token = getAuthToken();
   const headers = new Headers();
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -240,13 +234,13 @@ export async function downloadWebReport(
   const filename = decodeURIComponent(filenameFromHeader || fallbackName);
 
   const url = URL.createObjectURL(blob);
-  if (reportWindow) {
-    reportWindow.location.href = url;
-  } else {
-    URL.revokeObjectURL(url);
-    throw new Error(`No se pudo abrir la pestana para ${filename}. Verifica el bloqueador de popups.`);
-  }
+  
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 
-  // Mantener la URL temporal viva el tiempo suficiente para visualizar el PDF en la pestana.
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
